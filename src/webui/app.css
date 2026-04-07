@@ -261,7 +261,7 @@ button {
 .list-table-head,
 .file-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) 110px 100px 180px;
+  grid-template-columns: minmax(0, 1.4fr) 110px 100px 180px;
   align-items: center;
 }
 
@@ -314,6 +314,12 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-name {
+  flex: 1;
   min-width: 0;
 }
 

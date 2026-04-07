@@ -188,6 +188,7 @@ const state = {
   roots: [] as WorkspaceItem[],
   connection: null as ConnectionInfo | null,
   accessToken: '',
+  useQueryTokenAuth: false,
   currentRootId: '',
   currentPath: '',
   currentEntries: [] as FileEntry[],
@@ -237,6 +238,8 @@ bindEvents();
 void bootstrap().catch(handleUiError);
 
 async function bootstrap() {
+  state.accessToken = getPageAccessToken();
+  state.useQueryTokenAuth = state.accessToken.length > 0;
   const response = await api<WorkspacesResponse>('/api/workspaces');
 
   state.accessToken = response.accessToken;
@@ -1736,8 +1739,13 @@ async function downloadCompletedExport(token: number, title: string, jobId: stri
   const link = document.createElement('a');
   link.href = objectUrl;
   link.download = extractDownloadFileName(response.headers.get('content-disposition'));
+  link.style.display = 'none';
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(objectUrl);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+    link.remove();
+  }, 30_000);
   completeProgressDialog(token, `${title}已完成，下载已开始。`);
   setStatus(`${title}已完成。`);
 }
@@ -1778,7 +1786,7 @@ function wait(timeoutMs: number) {
 }
 
 function withAccessToken(url: string) {
-  if (!state.accessToken) {
+  if (!state.useQueryTokenAuth || !state.accessToken) {
     return url;
   }
 
@@ -1786,6 +1794,10 @@ function withAccessToken(url: string) {
   const params = new URLSearchParams(search);
   params.set('token', state.accessToken);
   return `${pathname}?${params.toString()}`;
+}
+
+function getPageAccessToken() {
+  return new URLSearchParams(window.location.search).get('token') ?? '';
 }
 
 async function resolveUploadTarget(targetOverride?: UploadTarget): Promise<UploadTarget | null> {
@@ -2441,7 +2453,7 @@ function escapeHtml(value: string) {
 }
 
 async function api<T = Record<string, unknown>>(input: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const response = await fetch(withAccessToken(input), init);
   const contentType = response.headers.get('content-type') ?? '';
 
   if (!contentType.includes('application/json')) {

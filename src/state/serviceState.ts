@@ -26,13 +26,23 @@ export function createServiceState(serverFactory: ServerFactory, authToken: stri
   let token: string | null = null;
   let localUrl: string | null = null;
   let server: RunningServer | null = null;
+  let startPromise: Promise<void> | null = null;
 
   return {
     async ensureStarted(handler) {
       if (!server) {
-        token = authToken;
-        server = await serverFactory.start(handler);
-        localUrl = `http://127.0.0.1:${server.port}/?token=${token}`;
+        if (!startPromise) {
+          startPromise = (async () => {
+            token = authToken;
+            const startedServer = await serverFactory.start(handler);
+            server = startedServer;
+            localUrl = `http://127.0.0.1:${startedServer.port}/?token=${token}`;
+          })().finally(() => {
+            startPromise = null;
+          });
+        }
+
+        await startPromise;
       }
 
       if (!token || !localUrl) {
@@ -45,13 +55,20 @@ export function createServiceState(serverFactory: ServerFactory, authToken: stri
       };
     },
     async stop() {
-      if (server) {
-        await server.stop();
-      }
+      const runningServer = server;
 
-      token = null;
-      localUrl = null;
-      server = null;
+      try {
+        if (runningServer) {
+          await runningServer.stop();
+        }
+      } finally {
+        if (server === runningServer) {
+          token = null;
+          localUrl = null;
+          server = null;
+        }
+        startPromise = null;
+      }
     },
     getSnapshot() {
       return {

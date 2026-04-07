@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('webui entry actions', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
+    window.history.replaceState({}, '', '/');
     window.localStorage.clear();
     document.body.innerHTML = `
       <div id="rootTree"></div>
@@ -190,8 +193,50 @@ describe('webui entry actions', () => {
     expect(operations).toContain('upload');
   });
 
+  it('uses the token from the page URL for bootstrap api requests when cookies are unavailable', async () => {
+    const requests: string[] = [];
+    window.history.replaceState({}, '', '/?token=secret-token');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      requests.push(url);
+
+      if (url === '/api/workspaces?token=secret-token') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
+            connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/tree?workspace=workspace-root&path=&token=secret-token') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: { path: '', items: [] }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+
+    expect(requests[0]).toBe('/api/workspaces?token=secret-token');
+    expect(requests[1]).toBe('/api/tree?workspace=workspace-root&path=&token=secret-token');
+  });
+
   it('shows export progress in a dialog and downloads the artifact after completion', async () => {
     const operations: string[] = [];
+    const revokeObjectUrlMock = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     Object.defineProperty(URL, 'createObjectURL', {
       value: vi.fn(() => 'blob:export'),
@@ -199,7 +244,7 @@ describe('webui entry actions', () => {
       writable: true
     });
     Object.defineProperty(URL, 'revokeObjectURL', {
-      value: vi.fn(),
+      value: revokeObjectUrlMock,
       configurable: true,
       writable: true
     });
@@ -294,7 +339,7 @@ describe('webui entry actions', () => {
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
 
-      if (url === '/api/export/jobs/job-1/download?token=secret-token' && method === 'GET') {
+      if (url === '/api/export/jobs/job-1/download' && method === 'GET') {
         operations.push('download-job');
         return new Response(new Uint8Array([1, 2, 3]), {
           status: 200,
@@ -327,6 +372,7 @@ describe('webui entry actions', () => {
     expect(document.querySelector<HTMLDivElement>('#exportProgressDialog')?.hidden).toBe(false);
     expect(document.querySelector<HTMLDivElement>('#exportProgressStage')?.textContent).toContain('已完成');
     expect(document.querySelector<HTMLDivElement>('#exportProgressCurrentMessage')?.textContent).toContain('已完成');
+    expect(revokeObjectUrlMock).not.toHaveBeenCalled();
   });
 
   it('cancels an export job with token even when the user cancels before the job id arrives', async () => {
@@ -385,7 +431,7 @@ describe('webui entry actions', () => {
         });
       }
 
-      if (url === '/api/export/jobs/job-early/cancel?token=secret-token' && method === 'POST') {
+      if (url === '/api/export/jobs/job-early/cancel' && method === 'POST') {
         operations.push('cancel-job');
         return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { cancelled: true } }), {
           status: 200,
@@ -493,13 +539,13 @@ describe('webui entry actions', () => {
 
     expect(openMock).toHaveBeenNthCalledWith(
       1,
-      '/api/download?workspace=workspace-root&path=a.txt&token=secret-token',
+      '/api/download?workspace=workspace-root&path=a.txt',
       '_blank',
       'noopener,noreferrer'
     );
     expect(openMock).toHaveBeenNthCalledWith(
       2,
-      '/api/download?workspace=workspace-root&path=b.txt&token=secret-token',
+      '/api/download?workspace=workspace-root&path=b.txt',
       '_blank',
       'noopener,noreferrer'
     );
@@ -558,7 +604,7 @@ describe('webui entry actions', () => {
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
 
-      if (url === '/api/download?workspace=workspace-root&path=photo.png&token=secret-token') {
+      if (url === '/api/download?workspace=workspace-root&path=photo.png') {
         operations.push('preview-download');
         return new Response(new Uint8Array([1, 2, 3, 4]), {
           status: 200,
@@ -636,7 +682,7 @@ describe('webui entry actions', () => {
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
 
-      if (url === '/api/download?workspace=workspace-root&path=readonly.log&token=secret-token') {
+      if (url === '/api/download?workspace=workspace-root&path=readonly.log') {
         operations.push('text-download');
         return new Response('readonly body', {
           status: 200,
@@ -1004,6 +1050,65 @@ describe('webui entry actions', () => {
     const rows = Array.from(document.querySelectorAll<HTMLElement>('.file-row'));
     expect(rows.every((row) => row.classList.contains('is-selected'))).toBe(true);
     expect(document.querySelector('#selectionSummary')?.textContent).toContain('2 项已选择');
+  });
+
+  it('renders long file names inside a shrinkable name container', async () => {
+    const css = readFileSync(path.resolve(process.cwd(), 'src/webui/app.css'), 'utf8');
+    expect(css).toMatch(/grid-template-columns:\s*minmax\(0,\s*1\.4fr\)\s+110px\s+100px\s+180px;/);
+    expect(css).toMatch(/\.tree-text,\s*\.file-name\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+    expect(css).toMatch(/\.file-row-main\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*\}/s);
+    expect(css).toMatch(/\.file-name\s*\{[^}]*flex:\s*1;[^}]*min-width:\s*0;[^}]*\}/s);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/workspaces') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
+            connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.startsWith('/api/tree')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [{
+              name: 'archive.super-extra-long-extension-name-that-keeps-going.forever-backup-package',
+              path: 'archive.super-extra-long-extension-name-that-keeps-going.forever-backup-package',
+              type: 'file',
+              size: 1024,
+              mtime: 1,
+              mimeType: 'application/octet-stream',
+              isText: false,
+              downloadable: true
+            }]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+
+    const rowMain = document.querySelector<HTMLElement>('.file-row-main');
+    const name = document.querySelector<HTMLElement>('.file-name');
+
+    expect(rowMain).not.toBeNull();
+    expect(name).not.toBeNull();
+    expect(name?.textContent).toContain('super-extra-long-extension-name');
   });
 
   it('loads disguise image settings and saves the selected template', async () => {

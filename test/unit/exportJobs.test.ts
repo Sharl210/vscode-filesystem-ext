@@ -50,6 +50,8 @@ describe('export jobs manager', () => {
 
     const download = manager.getDownload(started.jobId);
     expect(download?.fileName).toBe('sample.tar');
+    expect(manager.getJob(started.jobId)).toBeNull();
+    expect(manager.getDownload(started.jobId)).toBeNull();
   });
 });
 

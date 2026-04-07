@@ -1,12 +1,7 @@
+import type { GatewayExecutor } from '../executor/contracts';
 import type {
   CreateExportJobRequestDto,
-  ConnectionInfoDto,
-  DisguiseImageSettingsDto,
-  ExportJobSnapshotDto,
-  FileEntryDto,
-  GetFileResponseDto,
-  InitialLocationDto,
-  WorkspaceItemDto
+  DisguiseImageSettingsDto
 } from '../types/api';
 import { normalizeEntryName } from '../utils/nameValidation';
 import type { AuthState } from './auth';
@@ -20,27 +15,6 @@ import {
   type RouterResponse
 } from './response';
 
-interface RouterFileService {
-  listDirectory(directoryUri: string, directoryPath: string): Promise<FileEntryDto[]>;
-  readTextFile(fileUri: string, relativePath: string): Promise<GetFileResponseDto>;
-  readBinaryFile(fileUri: string, relativePath: string): Promise<{ data: Uint8Array; mimeType: string; fileName: string }>;
-  exportArchive(entries: Array<{ uri: string; path: string }>): Promise<{ data: Uint8Array; mimeType: string; fileName: string }>;
-  exportDisguisedImage(entries: Array<{ uri: string; path: string }>, imageDataUrl: string): Promise<{ data: Uint8Array; mimeType: string; fileName: string }>;
-  writeFileBytes(fileUri: string, content: Uint8Array): Promise<void>;
-  writeTextFile(fileUri: string, content: string): Promise<void>;
-  deleteEntry(targetUri: string): Promise<void>;
-  createDirectory(targetUri: string): Promise<void>;
-  renameEntry(fromUri: string, toUri: string): Promise<void>;
-  copyEntry(fromUri: string, toUri: string): Promise<void>;
-}
-
-interface RouterExportJobs {
-  startJob(input: { workspaceUri: string; paths: string[]; format: 'archive' | 'disguised-image' }): ExportJobSnapshotDto;
-  getJob(jobId: string): ExportJobSnapshotDto | null;
-  getDownload(jobId: string): { data: Uint8Array; mimeType: string; fileName: string } | null;
-  cancelJob(jobId: string): boolean;
-}
-
 export interface RouterRequest {
   method: string;
   url: string;
@@ -50,19 +24,13 @@ export interface RouterRequest {
 
 interface RouterDependencies {
   auth: AuthState;
-  getWorkspaces(): WorkspaceItemDto[];
-  getInitialLocation(): InitialLocationDto | null;
-  getConnectionInfo(): ConnectionInfoDto;
-  getWorkspaceById(id: string): WorkspaceItemDto | undefined;
+  executor: Pick<GatewayExecutor, 'reads' | 'files' | 'exports'>;
   getDisguiseImageSettings(): Promise<DisguiseImageSettingsDto>;
   saveDisguiseImageSettings(settings: {
     selectedSource: 'template' | 'custom';
     selectedTemplateId: string;
     customImageDataUrl: string | null;
   }): Promise<void>;
-  exportJobs: RouterExportJobs;
-  resolveWorkspacePath(workspaceUri: string, relativePath: string): string;
-  fileService: RouterFileService;
   getIndexHtml(): string;
   getStaticAsset(pathname: string): { body: Uint8Array; contentType: string } | undefined;
 }
@@ -70,11 +38,12 @@ interface RouterDependencies {
 export function createRouter(dependencies: RouterDependencies) {
   return {
     async handle(request: RouterRequest): Promise<RouterResponse> {
+      const { reads, files, exports } = dependencies.executor;
       const url = new URL(request.url, 'http://127.0.0.1');
 
       if (url.pathname === '/') {
         if (dependencies.auth.validateUiToken(url)) {
-          return sendRedirect('/', {
+          return sendHtml(dependencies.getIndexHtml(), {
             'set-cookie': `workspace-web-gateway-token=${dependencies.auth.token}; HttpOnly; SameSite=Strict; Path=/`
           });
         }
@@ -106,22 +75,22 @@ export function createRouter(dependencies: RouterDependencies) {
       if (url.pathname === '/api/workspaces' && request.method === 'GET') {
         return sendJsonSuccess({
           accessToken: dependencies.auth.token,
-          initialLocation: dependencies.getInitialLocation(),
-          items: dependencies.getWorkspaces(),
-          connection: dependencies.getConnectionInfo()
+          initialLocation: reads.getInitialLocation(),
+          items: reads.getWorkspaces(),
+          connection: reads.getConnectionInfo()
         });
       }
 
       if (url.pathname === '/api/upload' && request.method === 'POST') {
         const multipart = parseMultipart(request.body, request.headers['content-type'] ?? '');
         const uploadWorkspaceId = multipart.fields.workspace ?? '';
-        const uploadWorkspace = dependencies.getWorkspaceById(uploadWorkspaceId);
+        const uploadWorkspace = reads.getWorkspaceById(uploadWorkspaceId);
 
         if (!uploadWorkspace) {
           return sendJsonError('WORKSPACE_NOT_FOUND', '指定的 workspace 不存在或已失效');
         }
 
-        const targetDirectory = dependencies.resolveWorkspacePath(uploadWorkspace.uri, multipart.fields.path ?? '');
+        const targetDirectory = reads.resolveWorkspacePath(uploadWorkspace.uri, multipart.fields.path ?? '');
 
         let normalizedName: string;
         try {
@@ -132,7 +101,7 @@ export function createRouter(dependencies: RouterDependencies) {
 
         const targetUri = appendChildPath(targetDirectory, normalizedName);
 
-        await dependencies.fileService.writeFileBytes(targetUri, multipart.file.content);
+        await files.uploadFile(targetUri, multipart.file.content);
         return sendJsonSuccess({ uploaded: true, fileName: normalizedName });
       }
 
@@ -142,7 +111,7 @@ export function createRouter(dependencies: RouterDependencies) {
 
       const exportJobMatch = url.pathname.match(/^\/api\/export\/jobs\/([^/]+)(\/download|\/cancel)?$/);
       if (exportJobMatch && request.method === 'GET' && !exportJobMatch[2]) {
-        const job = dependencies.exportJobs.getJob(decodeURIComponent(exportJobMatch[1] ?? ''));
+        const job = exports.getJob(decodeURIComponent(exportJobMatch[1] ?? ''));
         if (!job) {
           return sendJsonError('ENTRY_NOT_FOUND', '导出任务不存在或已被清理');
         }
@@ -150,7 +119,7 @@ export function createRouter(dependencies: RouterDependencies) {
       }
 
       if (exportJobMatch && request.method === 'GET' && exportJobMatch[2] === '/download') {
-        const download = dependencies.exportJobs.getDownload(decodeURIComponent(exportJobMatch[1] ?? ''));
+        const download = exports.consumeDownload(decodeURIComponent(exportJobMatch[1] ?? ''));
         if (!download) {
           return sendJsonError('ENTRY_NOT_FOUND', '导出结果不存在或尚未完成');
         }
@@ -158,7 +127,7 @@ export function createRouter(dependencies: RouterDependencies) {
       }
 
       if (exportJobMatch && request.method === 'POST' && exportJobMatch[2] === '/cancel') {
-        const cancelled = dependencies.exportJobs.cancelJob(decodeURIComponent(exportJobMatch[1] ?? ''));
+        const cancelled = exports.cancelJob(decodeURIComponent(exportJobMatch[1] ?? ''));
         if (!cancelled) {
           return sendJsonError('ENTRY_NOT_FOUND', '导出任务不存在或已被清理');
         }
@@ -172,7 +141,7 @@ export function createRouter(dependencies: RouterDependencies) {
         }
 
         const payload = payloadResult.data;
-        const exportWorkspace = dependencies.getWorkspaceById(payload.workspace ?? '');
+        const exportWorkspace = reads.getWorkspaceById(payload.workspace ?? '');
         if (!exportWorkspace) {
           return sendJsonError('WORKSPACE_NOT_FOUND', '指定的 workspace 不存在或已失效');
         }
@@ -186,7 +155,7 @@ export function createRouter(dependencies: RouterDependencies) {
         let exportPaths: string[];
         try {
           exportPaths = collectExportPathsFromPayload(payload.paths);
-          resolveExportEntries(dependencies.resolveWorkspacePath, exportWorkspace.uri, exportPaths);
+          resolveExportEntries(reads.resolveWorkspacePath, exportWorkspace.uri, exportPaths);
         } catch (error) {
           if (error instanceof Error && error.message === 'PATH_FORBIDDEN') {
             return sendJsonError('PATH_FORBIDDEN', '请求的路径超出了 workspace 范围');
@@ -195,7 +164,7 @@ export function createRouter(dependencies: RouterDependencies) {
           return sendJsonError('PATH_FORBIDDEN', '请求的路径超出了 workspace 范围');
         }
 
-        return sendJsonSuccess(dependencies.exportJobs.startJob({
+        return sendJsonSuccess(exports.startJob({
           workspaceUri: exportWorkspace.uri,
           paths: exportPaths,
           format: payload.format
@@ -233,47 +202,47 @@ export function createRouter(dependencies: RouterDependencies) {
       }
 
       if (url.pathname === '/api/new-file' && request.method === 'POST') {
-        const targetWorkspace = dependencies.getWorkspaceById(jsonPayload.workspace ?? '');
+        const targetWorkspace = reads.getWorkspaceById(jsonPayload.workspace ?? '');
 
         if (!targetWorkspace) {
           return sendJsonError('WORKSPACE_NOT_FOUND', '指定的 workspace 不存在或已失效');
         }
 
-        const targetUri = dependencies.resolveWorkspacePath(targetWorkspace.uri, jsonPayload.path ?? '');
-        await dependencies.fileService.writeFileBytes(targetUri, new Uint8Array());
+        const targetUri = reads.resolveWorkspacePath(targetWorkspace.uri, jsonPayload.path ?? '');
+        await files.createFile(targetUri);
         return sendJsonSuccess({ created: true });
       }
 
       if (url.pathname === '/api/copy' && request.method === 'POST' && jsonPayload.fromWorkspace && jsonPayload.toWorkspace) {
-        const sourceWorkspace = dependencies.getWorkspaceById(jsonPayload.fromWorkspace);
-        const targetWorkspace = dependencies.getWorkspaceById(jsonPayload.toWorkspace);
+        const sourceWorkspace = reads.getWorkspaceById(jsonPayload.fromWorkspace);
+        const targetWorkspace = reads.getWorkspaceById(jsonPayload.toWorkspace);
 
         if (!sourceWorkspace || !targetWorkspace) {
           return sendJsonError('WORKSPACE_NOT_FOUND', '指定的 workspace 不存在或已失效');
         }
 
-        const fromUri = dependencies.resolveWorkspacePath(sourceWorkspace.uri, jsonPayload.fromPath ?? '');
-        const toUri = dependencies.resolveWorkspacePath(targetWorkspace.uri, jsonPayload.toPath ?? '');
-        await dependencies.fileService.copyEntry(fromUri, toUri);
+        const fromUri = reads.resolveWorkspacePath(sourceWorkspace.uri, jsonPayload.fromPath ?? '');
+        const toUri = reads.resolveWorkspacePath(targetWorkspace.uri, jsonPayload.toPath ?? '');
+        await files.copyEntry(fromUri, toUri);
         return sendJsonSuccess({ copied: true });
       }
 
       if (url.pathname === '/api/move' && request.method === 'POST') {
-        const sourceWorkspace = dependencies.getWorkspaceById(jsonPayload.fromWorkspace ?? '');
-        const targetWorkspace = dependencies.getWorkspaceById(jsonPayload.toWorkspace ?? '');
+        const sourceWorkspace = reads.getWorkspaceById(jsonPayload.fromWorkspace ?? '');
+        const targetWorkspace = reads.getWorkspaceById(jsonPayload.toWorkspace ?? '');
 
         if (!sourceWorkspace || !targetWorkspace) {
           return sendJsonError('WORKSPACE_NOT_FOUND', '指定的 workspace 不存在或已失效');
         }
 
-        const fromUri = dependencies.resolveWorkspacePath(sourceWorkspace.uri, jsonPayload.fromPath ?? '');
-        const toUri = dependencies.resolveWorkspacePath(targetWorkspace.uri, jsonPayload.toPath ?? '');
+        const fromUri = reads.resolveWorkspacePath(sourceWorkspace.uri, jsonPayload.fromPath ?? '');
+        const toUri = reads.resolveWorkspacePath(targetWorkspace.uri, jsonPayload.toPath ?? '');
 
         if (sourceWorkspace.id === targetWorkspace.id) {
-          await dependencies.fileService.renameEntry(fromUri, toUri);
+          await files.moveEntry(fromUri, toUri);
         } else {
-          await dependencies.fileService.copyEntry(fromUri, toUri);
-          await dependencies.fileService.deleteEntry(fromUri);
+          await files.copyEntry(fromUri, toUri);
+          await files.deleteEntry(fromUri);
         }
 
         return sendJsonSuccess({ moved: true });
@@ -281,7 +250,7 @@ export function createRouter(dependencies: RouterDependencies) {
 
       const workspaceId = url.searchParams.get('workspace') ?? jsonPayload.workspace ?? '';
       const relativePath = url.searchParams.get('path') ?? jsonPayload.path ?? '';
-      const workspace = dependencies.getWorkspaceById(workspaceId);
+      const workspace = reads.getWorkspaceById(workspaceId);
 
       if (!workspace) {
         return sendJsonError('WORKSPACE_NOT_FOUND', '指定的 workspace 不存在或已失效');
@@ -289,7 +258,7 @@ export function createRouter(dependencies: RouterDependencies) {
 
       let resolvedPath: string;
       try {
-        resolvedPath = dependencies.resolveWorkspacePath(workspace.uri, relativePath);
+        resolvedPath = reads.resolveWorkspacePath(workspace.uri, relativePath);
       } catch (error) {
         if (error instanceof Error && error.message === 'PATH_FORBIDDEN') {
           return sendJsonError('PATH_FORBIDDEN', '请求的路径超出了 workspace 范围');
@@ -307,7 +276,7 @@ export function createRouter(dependencies: RouterDependencies) {
 
         let exportEntries: Array<{ uri: string; path: string }>;
         try {
-          exportEntries = resolveExportEntries(dependencies.resolveWorkspacePath, workspace.uri, exportPaths);
+          exportEntries = resolveExportEntries(reads.resolveWorkspacePath, workspace.uri, exportPaths);
         } catch (error) {
           if (error instanceof Error && error.message === 'PATH_FORBIDDEN') {
             return sendJsonError('PATH_FORBIDDEN', '请求的路径超出了 workspace 范围');
@@ -316,7 +285,7 @@ export function createRouter(dependencies: RouterDependencies) {
           return sendJsonError('PATH_FORBIDDEN', '请求的路径超出了 workspace 范围');
         }
 
-        const archive = await dependencies.fileService.exportArchive(exportEntries);
+        const archive = await files.exportArchive(exportEntries);
         return sendBinaryDownload(archive.data, archive.mimeType, archive.fileName);
       }
 
@@ -339,7 +308,7 @@ export function createRouter(dependencies: RouterDependencies) {
 
         let exportEntries: Array<{ uri: string; path: string }>;
         try {
-          exportEntries = resolveExportEntries(dependencies.resolveWorkspacePath, workspace.uri, exportPaths);
+          exportEntries = resolveExportEntries(reads.resolveWorkspacePath, workspace.uri, exportPaths);
         } catch (error) {
           if (error instanceof Error && error.message === 'PATH_FORBIDDEN') {
             return sendJsonError('PATH_FORBIDDEN', '请求的路径超出了 workspace 范围');
@@ -348,12 +317,12 @@ export function createRouter(dependencies: RouterDependencies) {
           return sendJsonError('PATH_FORBIDDEN', '请求的路径超出了 workspace 范围');
         }
 
-        const archive = await dependencies.fileService.exportDisguisedImage(exportEntries, activeImage);
+        const archive = await files.exportDisguisedImage(exportEntries, activeImage);
         return sendBinaryDownload(archive.data, archive.mimeType, archive.fileName);
       }
 
       if (url.pathname === '/api/tree' && request.method === 'GET') {
-        const items = await dependencies.fileService.listDirectory(resolvedPath, relativePath);
+        const items = await files.listDirectory(resolvedPath, relativePath);
 
         return sendJsonSuccess({
           workspace: workspace.id,
@@ -363,7 +332,7 @@ export function createRouter(dependencies: RouterDependencies) {
       }
 
       if (url.pathname === '/api/file' && request.method === 'GET') {
-        const file = await dependencies.fileService.readTextFile(resolvedPath, relativePath);
+        const file = await files.readTextFile(resolvedPath, relativePath);
         return sendJsonSuccess(file);
       }
 
@@ -380,17 +349,17 @@ export function createRouter(dependencies: RouterDependencies) {
           return sendJsonError('INVALID_REQUEST', '写入内容格式无效');
         }
 
-        await dependencies.fileService.writeTextFile(resolvedPath, payload.content);
+        await files.writeTextFile(resolvedPath, payload.content);
         return sendJsonSuccess({ saved: true });
       }
 
       if (url.pathname === '/api/file' && request.method === 'DELETE') {
-        await dependencies.fileService.deleteEntry(resolvedPath);
+        await files.deleteEntry(resolvedPath);
         return sendJsonSuccess({ deleted: true });
       }
 
       if (url.pathname === '/api/mkdir' && request.method === 'POST') {
-        await dependencies.fileService.createDirectory(resolvedPath);
+        await files.createDirectory(resolvedPath);
         return sendJsonSuccess({ created: true });
       }
 
@@ -398,10 +367,10 @@ export function createRouter(dependencies: RouterDependencies) {
         const fromPath = jsonPayload.fromPath ?? '';
         const toPath = jsonPayload.toPath ?? '';
 
-        const fromUri = dependencies.resolveWorkspacePath(workspace.uri, fromPath);
-        const toUri = dependencies.resolveWorkspacePath(workspace.uri, toPath);
+        const fromUri = reads.resolveWorkspacePath(workspace.uri, fromPath);
+        const toUri = reads.resolveWorkspacePath(workspace.uri, toPath);
 
-        await dependencies.fileService.renameEntry(fromUri, toUri);
+        await files.renameEntry(fromUri, toUri);
         return sendJsonSuccess({ renamed: true });
       }
 
@@ -409,15 +378,15 @@ export function createRouter(dependencies: RouterDependencies) {
         const fromPath = jsonPayload.fromPath ?? '';
         const toPath = jsonPayload.toPath ?? '';
 
-        const fromUri = dependencies.resolveWorkspacePath(workspace.uri, fromPath);
-        const toUri = dependencies.resolveWorkspacePath(workspace.uri, toPath);
+        const fromUri = reads.resolveWorkspacePath(workspace.uri, fromPath);
+        const toUri = reads.resolveWorkspacePath(workspace.uri, toPath);
 
-        await dependencies.fileService.copyEntry(fromUri, toUri);
+        await files.copyEntry(fromUri, toUri);
         return sendJsonSuccess({ copied: true });
       }
 
       if (url.pathname === '/api/download' && request.method === 'GET') {
-        const download = await dependencies.fileService.readBinaryFile(resolvedPath, relativePath);
+        const download = await files.readBinaryFile(resolvedPath, relativePath);
         return sendBinaryDownload(download.data, download.mimeType, download.fileName);
       }
 

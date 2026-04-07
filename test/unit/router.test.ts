@@ -48,12 +48,56 @@ function createRouterForTest() {
     getDownload() {
       return null;
     },
+    consumeDownload() {
+      return null;
+    },
     cancelJob() {
       return true;
     }
   };
 
-  const fileService = {
+  const executor = {
+    reads: {
+      getWorkspaces() {
+        return [workspace, localRoot];
+      },
+      getInitialLocation() {
+        return {
+          rootId: workspace.id,
+          path: 'src/components',
+          activeFilePath: 'src/components/App.tsx',
+          expandedPaths: ['', 'src', 'src/components']
+        };
+      },
+      getConnectionInfo() {
+        return {
+          kind: 'remote' as const,
+          label: '远程 · ssh-remote · prod-server',
+          host: 'ubuntu-devbox',
+          remoteName: 'ssh-remote',
+          authority: 'ssh-remote+prod-server'
+        };
+      },
+      getWorkspaceById(id: string) {
+        if (id === workspace.id) {
+          return workspace;
+        }
+
+        if (id === localRoot.id) {
+          return localRoot;
+        }
+
+        return undefined;
+      },
+      resolveWorkspacePath(workspaceUri: string, relativePath: string) {
+        if (relativePath === '../outside') {
+          throw new Error('PATH_FORBIDDEN');
+        }
+
+        return `${workspaceUri}/${relativePath}`.replace(/\/$/, '');
+      }
+    },
+    files: {
     async listDirectory(_uri: string, relativePath: string) {
       return [
         {
@@ -98,6 +142,9 @@ function createRouterForTest() {
     async copyEntry(fromUri: string, toUri: string) {
       calls.push(`copy:${fromUri}->${toUri}`);
     },
+    async moveEntry(fromUri: string, toUri: string) {
+      calls.push(`move:${fromUri}->${toUri}`);
+    },
     async readBinaryFile() {
       return {
         data: new TextEncoder().encode('raw bytes'),
@@ -120,43 +167,21 @@ function createRouterForTest() {
       };
     },
     async writeFileBytes(targetUri: string, content: Uint8Array) {
+      calls.push(`write-bytes:${targetUri}:${content.byteLength}`);
+    },
+    async uploadFile(targetUri: string, content: Uint8Array) {
       calls.push(`upload:${targetUri}:${content.byteLength}`);
+    },
+    async createFile(targetUri: string) {
+      calls.push(`create:${targetUri}`);
     }
+    },
+    exports: exportJobs
   };
 
   const router = createRouter({
     auth,
-    getWorkspaces() {
-      return [workspace, localRoot];
-    },
-    getInitialLocation() {
-      return {
-        rootId: workspace.id,
-        path: 'src/components',
-        activeFilePath: 'src/components/App.tsx',
-        expandedPaths: ['', 'src', 'src/components']
-      };
-    },
-    getConnectionInfo() {
-      return {
-        kind: 'remote' as const,
-        label: '远程 · ssh-remote · prod-server',
-        host: 'ubuntu-devbox',
-        remoteName: 'ssh-remote',
-        authority: 'ssh-remote+prod-server'
-      };
-    },
-    getWorkspaceById(id) {
-      if (id === workspace.id) {
-        return workspace;
-      }
-
-      if (id === localRoot.id) {
-        return localRoot;
-      }
-
-      return undefined;
-    },
+    executor,
     async getDisguiseImageSettings() {
       return disguiseSettings;
     },
@@ -166,15 +191,6 @@ function createRouterForTest() {
         ...settings
       };
     },
-    exportJobs,
-    resolveWorkspacePath(workspaceUri, relativePath) {
-      if (relativePath === '../outside') {
-        throw new Error('PATH_FORBIDDEN');
-      }
-
-      return `${workspaceUri}/${relativePath}`.replace(/\/$/, '');
-    },
-    fileService,
     getIndexHtml() {
       return '<!doctype html><html><body>ok</body></html>';
     },
@@ -187,6 +203,161 @@ function createRouterForTest() {
 }
 
 describe('router', () => {
+  it('reads workspace bootstrap data only through executor ports', async () => {
+    const auth = createAuthState('secret-token');
+    const dependencies = {
+      auth,
+      executor: {
+        reads: {
+          getWorkspaces() {
+            return [workspace];
+          },
+          getInitialLocation() {
+            return null;
+          },
+          getConnectionInfo() {
+            return {
+              kind: 'local' as const,
+              label: '本机',
+              host: 'test-host',
+              remoteName: null,
+              authority: null
+            };
+          },
+          getWorkspaceById() {
+            return workspace;
+          },
+          resolveWorkspacePath(workspaceUri: string, relativePath: string) {
+            return `${workspaceUri}/${relativePath}`;
+          }
+        },
+        files: {
+          async listDirectory() {
+            return [];
+          },
+          async readTextFile() {
+            throw new Error('unused');
+          },
+          async writeTextFile() {
+            throw new Error('unused');
+          },
+          async deleteEntry() {
+            throw new Error('unused');
+          },
+          async createDirectory() {
+            throw new Error('unused');
+          },
+          async renameEntry() {
+            throw new Error('unused');
+          },
+          async copyEntry() {
+            throw new Error('unused');
+          },
+          async moveEntry() {
+            throw new Error('unused');
+          },
+          async readBinaryFile() {
+            throw new Error('unused');
+          },
+          async exportArchive() {
+            throw new Error('unused');
+          },
+          async exportDisguisedImage() {
+            throw new Error('unused');
+          },
+          async writeFileBytes() {
+            throw new Error('unused');
+          },
+          async uploadFile() {
+            throw new Error('unused');
+          },
+          async createFile() {
+            throw new Error('unused');
+          }
+        },
+        exports: {
+          startJob() {
+            throw new Error('unused');
+          },
+          getJob() {
+            return null;
+          },
+          getDownload() {
+            return null;
+          },
+          consumeDownload() {
+            return null;
+          },
+          cancelJob() {
+            return false;
+          }
+        }
+      },
+      async getDisguiseImageSettings() {
+        return {
+          selectedSource: 'template' as const,
+          selectedTemplateId: 'template-sunset',
+          customImageDataUrl: null,
+          templates: []
+        };
+      },
+      async saveDisguiseImageSettings() {},
+      getIndexHtml() {
+        return '<html />';
+      },
+      getStaticAsset() {
+        return undefined;
+      }
+    } as unknown as {
+      auth: ReturnType<typeof createAuthState>;
+      executor: Parameters<typeof createRouter>[0]['executor'];
+      getDisguiseImageSettings: Parameters<typeof createRouter>[0]['getDisguiseImageSettings'];
+      saveDisguiseImageSettings: Parameters<typeof createRouter>[0]['saveDisguiseImageSettings'];
+      getIndexHtml: Parameters<typeof createRouter>[0]['getIndexHtml'];
+      getStaticAsset: Parameters<typeof createRouter>[0]['getStaticAsset'];
+    } & Record<string, unknown>;
+
+    Object.defineProperties(dependencies, {
+      fileService: {
+        get() {
+          throw new Error('legacy fileService should not be read');
+        }
+      },
+      exportJobs: {
+        get() {
+          throw new Error('legacy exportJobs should not be read');
+        }
+      },
+      getWorkspaces: {
+        get() {
+          throw new Error('legacy getWorkspaces should not be read');
+        }
+      },
+      getInitialLocation: {
+        get() {
+          throw new Error('legacy getInitialLocation should not be read');
+        }
+      }
+    });
+
+    const router = createRouter(dependencies as never);
+    const response = await router.handle({
+      method: 'GET',
+      url: '/api/workspaces?token=secret-token',
+      headers: {},
+      body: new Uint8Array()
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.jsonBody).toMatchObject({
+      ok: true,
+      data: {
+        items: [workspace],
+        initialLocation: null
+      }
+    });
+  });
+
   it('returns 401 for api requests without auth', async () => {
     const { router } = createRouterForTest();
 
@@ -214,7 +385,7 @@ describe('router', () => {
     expect(response.jsonBody).toMatchObject({ ok: true });
   });
 
-  it('redirects root token requests and sets auth cookie', async () => {
+  it('serves root token requests directly and sets auth cookie', async () => {
     const { router } = createRouterForTest();
 
     const response = await router.handle({
@@ -224,8 +395,8 @@ describe('router', () => {
       body: new Uint8Array()
     });
 
-    expect(response.status).toBe(302);
-    expect(response.headers.location).toBe('/');
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
     expect(response.headers['set-cookie']).toContain('workspace-web-gateway-token=secret-token');
   });
 
@@ -500,7 +671,31 @@ describe('router', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(calls).toEqual(['upload:file:///workspace/demo/src/new-file.txt:0']);
+    expect(calls).toEqual(['create:file:///workspace/demo/src/new-file.txt']);
+  });
+
+  it('moves entries within the same workspace through the move executor port', async () => {
+    const { router, calls } = createRouterForTest();
+
+    const response = await router.handle({
+      method: 'POST',
+      url: '/api/move',
+      headers: {
+        authorization: 'Bearer secret-token',
+        'content-type': 'application/json'
+      },
+      body: new TextEncoder().encode(
+        JSON.stringify({
+          fromWorkspace: 'ws_demo',
+          fromPath: 'src/source.txt',
+          toWorkspace: 'ws_demo',
+          toPath: 'src/target.txt'
+        })
+      )
+    });
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual(['move:file:///workspace/demo/src/source.txt->file:///workspace/demo/src/target.txt']);
   });
 
   it('copies entries across roots', async () => {

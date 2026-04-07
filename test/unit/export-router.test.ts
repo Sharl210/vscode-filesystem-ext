@@ -23,7 +23,9 @@ function createExportRouterForTest() {
     ]
   };
   const exportJobs = {
+    letDownloadAvailable: true,
     startJob() {
+      calls.push('job:start');
       return {
         jobId: 'job-1',
         status: 'running' as const,
@@ -37,6 +39,7 @@ function createExportRouterForTest() {
       };
     },
     getJob() {
+      calls.push('job:get');
       return {
         jobId: 'job-1',
         status: 'completed' as const,
@@ -50,6 +53,15 @@ function createExportRouterForTest() {
       };
     },
     getDownload() {
+      throw new Error('download should use consumeDownload');
+    },
+    consumeDownload() {
+      calls.push('job:download');
+      if (!this.letDownloadAvailable) {
+        return null;
+      }
+
+      this.letDownloadAvailable = false;
       return {
         data: new TextEncoder().encode('job-download'),
         mimeType: 'application/x-tar',
@@ -57,11 +69,40 @@ function createExportRouterForTest() {
       };
     },
     cancelJob() {
+      calls.push('job:cancel');
       return true;
     }
   };
 
-  const fileService = {
+  const executor = {
+    reads: {
+      getWorkspaces() {
+        return [workspace];
+      },
+      getInitialLocation() {
+        return null;
+      },
+      getConnectionInfo() {
+        return {
+          kind: 'local' as const,
+          label: '本机 · test',
+          host: 'test',
+          remoteName: null,
+          authority: null
+        };
+      },
+      getWorkspaceById(id: string) {
+        return id === workspace.id ? workspace : undefined;
+      },
+      resolveWorkspacePath(workspaceUri: string, relativePath: string) {
+        if (relativePath === '../outside') {
+          throw new Error('PATH_FORBIDDEN');
+        }
+
+        return `${workspaceUri}/${relativePath}`.replace(/\/$/, '');
+      }
+    },
+    files: {
     async listDirectory() {
       return [];
     },
@@ -90,11 +131,14 @@ function createExportRouterForTest() {
       };
     },
     async writeFileBytes() {},
+    async uploadFile() {},
+    async createFile() {},
     async writeTextFile() {},
     async deleteEntry() {},
     async createDirectory() {},
     async renameEntry() {},
     async copyEntry() {},
+    async moveEntry() {},
     async exportArchive(entries: Array<{ uri: string; path: string }>) {
       calls.push(`archive:${entries.map((entry) => entry.path).join('|')}`);
       return {
@@ -111,28 +155,13 @@ function createExportRouterForTest() {
         fileName: 'bundle.png'
       };
     }
+    },
+    exports: exportJobs
   };
 
   const router = createRouter({
     auth,
-    getWorkspaces() {
-      return [workspace];
-    },
-    getInitialLocation() {
-      return null;
-    },
-    getConnectionInfo() {
-      return {
-        kind: 'local' as const,
-        label: '本机 · test',
-        host: 'test',
-        remoteName: null,
-        authority: null
-      };
-    },
-    getWorkspaceById(id) {
-      return id === workspace.id ? workspace : undefined;
-    },
+    executor,
     async getDisguiseImageSettings() {
       return disguiseSettings;
     },
@@ -142,15 +171,6 @@ function createExportRouterForTest() {
         ...settings
       };
     },
-    exportJobs,
-    resolveWorkspacePath(workspaceUri, relativePath) {
-      if (relativePath === '../outside') {
-        throw new Error('PATH_FORBIDDEN');
-      }
-
-      return `${workspaceUri}/${relativePath}`.replace(/\/$/, '');
-    },
-    fileService,
     getIndexHtml() {
       return '<!doctype html><html><body>ok</body></html>';
     },
@@ -291,6 +311,22 @@ describe('export router', () => {
     expect(response.headers['content-type']).toBe('application/x-tar');
     expect(response.headers['content-disposition']).toContain('bundle.tar');
     expect(new TextDecoder().decode(response.body)).toBe('job-download');
+
+    const secondResponse = await router.handle({
+      method: 'GET',
+      url: '/api/export/jobs/job-1/download',
+      headers: { authorization: 'Bearer secret-token' },
+      body: new Uint8Array()
+    });
+
+    expect(secondResponse.status).toBe(404);
+    expect(secondResponse.jsonBody).toEqual({
+      ok: false,
+      error: {
+        code: 'ENTRY_NOT_FOUND',
+        message: '导出结果不存在或尚未完成'
+      }
+    });
   });
 
   it('cancels export jobs through the cancel endpoint', async () => {

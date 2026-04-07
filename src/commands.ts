@@ -1,5 +1,6 @@
-import * as vscode from 'vscode';
 import os from 'node:os';
+import * as vscode from 'vscode';
+import { createLocalGatewayExecutor } from './executor/localGatewayExecutor';
 import { createAuthState } from './server/auth';
 import { createNodeServerFactory } from './server/createServer';
 import { createRouter } from './server/router';
@@ -28,30 +29,35 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     },
     resolveWorkspacePath
   });
+  const executor = createLocalGatewayExecutor({
+    reads: {
+      getWorkspaces() {
+        return syncWorkspaceRegistry(workspaceRegistry);
+      },
+      getInitialLocation() {
+        return getInitialLocation(workspaceRegistry);
+      },
+      getConnectionInfo() {
+        return getConnectionInfo();
+      },
+      getWorkspaceById(id) {
+        return syncWorkspaceRegistry(workspaceRegistry).find((item) => item.id === id);
+      },
+      resolveWorkspacePath
+    },
+    fileService,
+    exportJobs
+  });
 
   const router = createRouter({
     auth: authState,
-    getWorkspaces() {
-      return syncWorkspaceRegistry(workspaceRegistry);
-    },
-    getInitialLocation() {
-      return getInitialLocation(workspaceRegistry);
-    },
-    getConnectionInfo() {
-      return getConnectionInfo();
-    },
-    getWorkspaceById(id) {
-      return syncWorkspaceRegistry(workspaceRegistry).find((item) => item.id === id);
-    },
+    executor,
     getDisguiseImageSettings() {
       return disguiseImageSettingsStore.getSettings();
     },
     saveDisguiseImageSettings(settings) {
       return disguiseImageSettingsStore.saveSettings(settings);
     },
-    exportJobs,
-    resolveWorkspacePath,
-    fileService,
     getIndexHtml() {
       return staticAssets.getIndexHtml();
     },
