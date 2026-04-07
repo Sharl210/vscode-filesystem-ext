@@ -6,6 +6,7 @@ describe('webui entry actions', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
+    window.localStorage.clear();
     document.body.innerHTML = `
       <div id="rootTree"></div>
       <div id="fileList"></div>
@@ -722,6 +723,169 @@ describe('webui entry actions', () => {
     refreshedToggles[0]?.click();
     await flush();
     expect(document.body.textContent).not.toContain('Users');
+  });
+
+  it('opens the active file directory on bootstrap and selects the active file', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/workspaces') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            initialLocation: {
+              rootId: 'workspace-root',
+              path: 'src/components',
+              activeFilePath: 'src/components/App.tsx',
+              expandedPaths: ['', 'src', 'src/components']
+            },
+            items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
+            connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/tree?workspace=workspace-root&path=src%2Fcomponents') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: 'src/components',
+            items: [
+              { name: 'App.tsx', path: 'src/components/App.tsx', type: 'file', size: 1, mtime: 1, mimeType: 'text/plain', isText: true, downloadable: true },
+              { name: 'Button.tsx', path: 'src/components/Button.tsx', type: 'file', size: 1, mtime: 1, mimeType: 'text/plain', isText: true, downloadable: true }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/tree?workspace=workspace-root&path=') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [
+              { name: 'src', path: 'src', type: 'directory', size: 0, mtime: 1, mimeType: 'inode/directory', isText: false, downloadable: false }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/tree?workspace=workspace-root&path=src') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: 'src',
+            items: [
+              { name: 'components', path: 'src/components', type: 'directory', size: 0, mtime: 1, mimeType: 'inode/directory', isText: false, downloadable: false }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+    await flush();
+
+    expect(document.querySelector<HTMLInputElement>('#pathInput')?.value).toBe('src/components');
+    expect(document.body.textContent).toContain('components');
+    const selectedRow = document.querySelector<HTMLElement>('.file-row.is-selected');
+    expect(selectedRow?.dataset.path).toBe('src/components/App.tsx');
+  });
+
+  it('restores remembered expanded directories per root from local storage', async () => {
+    window.localStorage.setItem('workspaceWebGateway.expandedNodes.v1', JSON.stringify({
+      'workspace-root': ['', 'src'],
+      'local-c': ['']
+    }));
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/workspaces') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            initialLocation: null,
+            items: [
+              { id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' },
+              { id: 'local-c', name: '本机根目录 (C:)', uri: 'file:///C:/', source: 'local' }
+            ],
+            connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/tree?workspace=workspace-root&path=') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [
+              { name: 'src', path: 'src', type: 'directory', size: 0, mtime: 1, mimeType: 'inode/directory', isText: false, downloadable: false }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/tree?workspace=workspace-root&path=src') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: 'src',
+            items: [
+              { name: 'components', path: 'src/components', type: 'directory', size: 0, mtime: 1, mimeType: 'inode/directory', isText: false, downloadable: false }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/tree?workspace=local-c&path=') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [
+              { name: 'Users', path: 'Users', type: 'directory', size: 0, mtime: 1, mimeType: 'inode/directory', isText: false, downloadable: false }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+    await flush();
+
+    expect(document.body.textContent).toContain('components');
+
+    const localRootButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.tree-action')).find((button) => button.textContent?.includes('本机根目录'));
+    localRootButton?.click();
+    await flush();
+
+    expect(document.body.textContent).toContain('Users');
+
+    const workspaceRootButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.tree-action')).find((button) => button.textContent?.includes('工作区 · demo'));
+    workspaceRootButton?.click();
+    await flush();
+
+    expect(document.body.textContent).toContain('components');
   });
 
   it('supports marquee selection across file rows', async () => {

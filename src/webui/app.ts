@@ -17,6 +17,20 @@ interface ConnectionInfo {
   authority: string | null;
 }
 
+interface InitialLocation {
+  rootId: string;
+  path: string;
+  activeFilePath: string | null;
+  expandedPaths: string[];
+}
+
+interface WorkspacesResponse {
+  accessToken: string;
+  initialLocation: InitialLocation | null;
+  items: WorkspaceItem[];
+  connection: ConnectionInfo;
+}
+
 interface DisguiseImageTemplate {
   id: string;
   label: string;
@@ -168,6 +182,7 @@ const exportProgressCurrentMessage = requireElement<HTMLDivElement>('#exportProg
 const exportProgressMessages = requireElement<HTMLDivElement>('#exportProgressMessages');
 const exportProgressCloseButton = requireElement<HTMLButtonElement>('#exportProgressCloseButton');
 const exportProgressCancelButton = requireElement<HTMLButtonElement>('#exportProgressCancelButton');
+const expandedNodesStorageKey = 'workspaceWebGateway.expandedNodes.v1';
 
 const state = {
   roots: [] as WorkspaceItem[],
@@ -222,16 +237,26 @@ bindEvents();
 void bootstrap().catch(handleUiError);
 
 async function bootstrap() {
-  const response = await api<{ accessToken: string; items: WorkspaceItem[]; connection: ConnectionInfo }>('/api/workspaces');
+  const response = await api<WorkspacesResponse>('/api/workspaces');
 
   state.accessToken = response.accessToken;
   state.roots = response.items;
   state.connection = response.connection;
-  state.currentRootId = pickInitialRootId(response.items);
-  state.currentPath = '';
+  restoreExpandedNodes();
+
+  const initialLocation = response.initialLocation;
+  if (initialLocation) {
+    applyExpandedPaths(initialLocation.rootId, initialLocation.expandedPaths);
+  }
+
+  state.currentRootId = initialLocation?.rootId ?? pickInitialRootId(response.items);
+  state.currentPath = initialLocation?.path ?? '';
 
   renderConnection();
-  await loadDirectory(state.currentRootId, '', { renderTreeAfter: true });
+  await loadDirectory(state.currentRootId, state.currentPath, {
+    renderTreeAfter: true,
+    selectedPath: initialLocation?.activeFilePath ?? null
+  });
 }
 
 function bindEvents() {
@@ -353,7 +378,7 @@ async function refreshCurrentDirectory() {
   setStatus('目录已刷新。');
 }
 
-async function loadDirectory(rootId: string, path: string, options: { renderTreeAfter?: boolean } = {}) {
+async function loadDirectory(rootId: string, path: string, options: { renderTreeAfter?: boolean; selectedPath?: string | null } = {}) {
   if (!rootId) {
     renderAll();
     return;
@@ -366,6 +391,12 @@ async function loadDirectory(rootId: string, path: string, options: { renderTree
   state.selectedPaths.clear();
   state.lastSelectedIndex = -1;
   state.treeCache.set(treeNodeKey(rootId, path), response.items.filter((item) => item.type === 'directory'));
+
+  if (options.selectedPath && response.items.some((item) => item.path === options.selectedPath)) {
+    state.selectedPaths.add(options.selectedPath);
+  }
+
+  await hydrateExpandedNodesForRoot(rootId);
 
   if (options.renderTreeAfter) {
     renderTree();
@@ -388,13 +419,75 @@ async function toggleTreeNode(node: TreeNodeState) {
   const key = treeNodeKey(node.rootId, node.path);
   if (state.expandedNodes.has(key)) {
     state.expandedNodes.delete(key);
+    persistExpandedNodes();
     renderTree();
     return;
   }
 
   await ensureTreeChildren(node.rootId, node.path);
   state.expandedNodes.add(key);
+  persistExpandedNodes();
   renderTree();
+}
+
+async function hydrateExpandedNodesForRoot(rootId: string) {
+  const expandedPaths = getExpandedPathsForRoot(rootId)
+    .sort((left, right) => left.split('/').filter(Boolean).length - right.split('/').filter(Boolean).length);
+
+  for (const path of expandedPaths) {
+    await ensureTreeChildren(rootId, path);
+  }
+}
+
+function getExpandedPathsForRoot(rootId: string) {
+  const prefix = `${rootId}::`;
+  return [...state.expandedNodes]
+    .filter((key) => key.startsWith(prefix))
+    .map((key) => key.slice(prefix.length));
+}
+
+function applyExpandedPaths(rootId: string, paths: string[]) {
+  for (const path of paths) {
+    state.expandedNodes.add(treeNodeKey(rootId, normalizePath(path)));
+  }
+  persistExpandedNodes();
+}
+
+function restoreExpandedNodes() {
+  state.expandedNodes.clear();
+
+  try {
+    const raw = window.localStorage.getItem(expandedNodesStorageKey);
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    for (const root of state.roots) {
+      const storedPaths = parsed[root.id];
+      if (!Array.isArray(storedPaths)) {
+        continue;
+      }
+
+      for (const path of storedPaths) {
+        if (typeof path === 'string') {
+          state.expandedNodes.add(treeNodeKey(root.id, normalizePath(path)));
+        }
+      }
+    }
+  } catch {
+    window.localStorage.removeItem(expandedNodesStorageKey);
+  }
+}
+
+function persistExpandedNodes() {
+  const payload: Record<string, string[]> = {};
+
+  for (const root of state.roots) {
+    payload[root.id] = getExpandedPathsForRoot(root.id);
+  }
+
+  window.localStorage.setItem(expandedNodesStorageKey, JSON.stringify(payload));
 }
 
 function renderAll() {
