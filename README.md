@@ -18,7 +18,7 @@
 
 ## 安装说明
 
-1. 下载 Release 中的 `vscode-filesystem-ext-0.0.1.vsix`
+1. 下载 Release 中的 `vscode-filesystem-ext-0.0.3.vsix`
 2. 打开 VS Code
 3. 进入扩展面板
 4. 右上角菜单选择“从 VSIX 安装”
@@ -27,7 +27,7 @@
 也可以命令行安装：
 
 ```bash
-code --install-extension vscode-filesystem-ext-0.0.1.vsix
+code --install-extension vscode-filesystem-ext-0.0.3.vsix
 ```
 
 ## 使用说明
