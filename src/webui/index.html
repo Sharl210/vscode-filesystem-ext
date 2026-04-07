@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vscode-filesystem-ext</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="explorer-app" data-testid="explorer-app">
+      <header class="topbar" data-testid="topbar">
+        <div class="brand-block">
+          <h1>vscode-filesystem-ext</h1>
+          <p id="connectionInfo" class="connection-info"></p>
+        </div>
+
+        <div class="toolbar" data-testid="toolbar">
+          <button id="refreshButton" type="button">刷新</button>
+          <button id="upButton" type="button">上一级</button>
+          <button id="newFileButton" type="button">新建文件</button>
+          <button id="mkdirButton" type="button">新建文件夹</button>
+          <button id="renameButton" type="button">重命名</button>
+          <button id="deleteButton" type="button">删除</button>
+          <button id="copyButton" type="button">复制</button>
+          <button id="cutButton" type="button">剪切</button>
+          <button id="pasteButton" type="button">粘贴</button>
+          <button id="downloadButton" type="button">下载</button>
+          <button id="exportArchiveButton" type="button">打包下载</button>
+          <button id="exportDisguisedImageButton" type="button">导出为伪装图片</button>
+          <button id="uploadTriggerButton" type="button">上传</button>
+          <button id="settingsButton" type="button" aria-label="伪装图片设置">⚙️</button>
+          <input id="uploadInput" type="file" multiple hidden />
+          <input id="uploadFolderInput" type="file" webkitdirectory multiple hidden />
+        </div>
+
+        <div class="search-block">
+          <label class="search-field">
+            <span>搜索</span>
+            <input id="searchInput" type="search" placeholder="搜索当前目录" />
+          </label>
+        </div>
+      </header>
+
+      <div class="address-row">
+        <div id="breadcrumbs" class="breadcrumbs" data-testid="breadcrumbs"></div>
+        <label class="path-field">
+          <span>路径</span>
+          <input id="pathInput" type="text" value="" />
+        </label>
+      </div>
+
+      <main class="workspace-shell">
+        <aside class="tree-pane" data-testid="roots-tree">
+          <div class="pane-header">资源</div>
+          <div id="rootTree" class="tree-root"></div>
+        </aside>
+
+        <section class="list-pane">
+          <div class="pane-header list-header-row">
+            <span>文件列表</span>
+            <span id="selectionSummary" class="selection-summary"></span>
+          </div>
+
+          <div class="list-table-head" data-testid="file-list-head">
+            <div class="name-head-cell">
+              <label class="select-all-cell">
+                <input id="selectAllCheckbox" type="checkbox" />
+              </label>
+              <button class="column-btn" data-sort-key="name" type="button">名称</button>
+            </div>
+            <button class="column-btn" data-sort-key="type" type="button">类型</button>
+            <button class="column-btn" data-sort-key="size" type="button">大小</button>
+            <button class="column-btn" data-sort-key="mtime" type="button">修改时间</button>
+          </div>
+
+          <div id="fileList" class="file-list" data-testid="file-list"></div>
+        </section>
+
+        <section class="tab-pane">
+          <div id="tabStrip" class="tab-strip" data-testid="editor-tabs"></div>
+          <div id="viewerToolbar" class="viewer-toolbar"></div>
+          <div id="viewerSurface" class="viewer-surface" data-testid="viewer-surface"></div>
+        </section>
+      </main>
+
+      <footer class="statusbar">
+        <div id="statusMessage" class="status-text"></div>
+        <div id="clipboardStatus" class="clipboard-text"></div>
+      </footer>
+    </div>
+
+    <div id="contextMenu" class="context-menu" hidden></div>
+
+    <div id="uploadChoiceDialog" class="settings-dialog" hidden>
+      <div class="settings-panel settings-panel--compact">
+        <div class="settings-panel-header">
+          <div>
+            <h2>选择上传方式</h2>
+            <p>可以上传普通文件，也可以整文件夹上传。</p>
+          </div>
+          <button id="uploadChoiceCloseButton" type="button">关闭</button>
+        </div>
+
+        <div class="settings-panel-body settings-panel-body--compact">
+          <div class="choice-actions">
+            <button id="uploadFileChoiceButton" type="button">上传文件</button>
+            <button id="uploadFolderChoiceButton" type="button">上传文件夹</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="disguiseSettingsDialog" class="settings-dialog" hidden>
+      <div class="settings-panel">
+        <div class="settings-panel-header">
+          <div>
+            <h2>伪装图片设置</h2>
+            <p>内置模板和自定义图片都会统一转为 PNG，并在本地持久化保存。</p>
+          </div>
+          <button id="disguiseSettingsCloseButton" type="button">关闭</button>
+        </div>
+
+        <div class="settings-panel-body">
+          <section class="settings-group">
+            <h3>内置模板</h3>
+            <div id="disguiseTemplateList" class="template-grid"></div>
+          </section>
+
+          <section class="settings-group">
+            <h3>自定义图片</h3>
+            <p>支持上传常见图片格式，保存前会自动转换成 PNG。</p>
+            <input id="disguiseCustomInput" type="file" accept="image/*" />
+            <div id="disguiseSelectedFileName" class="selected-file-name">未选择文件</div>
+          </section>
+
+          <section class="settings-group">
+            <h3>当前效果</h3>
+            <img id="disguiseCurrentPreview" class="settings-preview" alt="当前伪装图片预览" />
+          </section>
+
+          <section class="settings-group">
+            <h3>伪装图片归档模式</h3>
+            <div id="disguiseArchiveFormatDescription" class="selected-file-name"></div>
+          </section>
+        </div>
+
+        <div class="settings-panel-footer">
+          <button id="disguiseSettingsSaveButton" type="button">保存设置</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="exportProgressDialog" class="settings-dialog" hidden>
+      <div class="settings-panel">
+        <div class="settings-panel-header">
+          <div>
+            <h2 id="exportProgressTitle"></h2>
+            <p id="exportProgressCurrentMessage"></p>
+          </div>
+          <button id="exportProgressCloseButton" type="button">关闭</button>
+        </div>
+
+        <div class="settings-panel-body">
+          <section class="settings-group">
+            <div class="progress-meta">
+              <span id="exportProgressStage" class="progress-stage"></span>
+              <span id="exportProgressPercent" class="progress-percent"></span>
+            </div>
+            <div class="progress-track">
+              <div id="exportProgressBar" class="progress-bar"></div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>过程信息</h3>
+            <div id="exportProgressMessages" class="progress-messages"></div>
+          </section>
+        </div>
+
+        <div class="settings-panel-footer">
+          <button id="exportProgressCancelButton" type="button">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
