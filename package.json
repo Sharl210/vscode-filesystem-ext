@@ -1,0 +1,73 @@
+{
+  "name": "vscode-filesystem-ext",
+  "displayName": "vscode-filesystem-ext",
+  "description": "通过本地网页网关暴露当前 VS Code 已打开的工作区文件。",
+  "version": "0.0.1",
+  "publisher": "local",
+  "private": true,
+  "license": "PolyForm Noncommercial 1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sharl210/vscode-filesystem-ext.git"
+  },
+  "homepage": "https://github.com/Sharl210/vscode-filesystem-ext",
+  "bugs": {
+    "url": "https://github.com/Sharl210/vscode-filesystem-ext/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:workspaceWebGateway.startService",
+    "onCommand:workspaceWebGateway.stopService",
+    "onCommand:workspaceWebGateway.openWebUi",
+    "onCommand:workspaceWebGateway.copyAccessUrl"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "workspaceWebGateway.startService",
+        "title": "工作区网页网关：启动服务"
+      },
+      {
+        "command": "workspaceWebGateway.stopService",
+        "title": "工作区网页网关：停止服务"
+      },
+      {
+        "command": "workspaceWebGateway.openWebUi",
+        "title": "工作区网页网关：打开网页界面"
+      },
+      {
+        "command": "workspaceWebGateway.copyAccessUrl",
+        "title": "工作区网页网关：复制访问地址"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "test": "vitest run",
+    "test:extension": "node ./test/extension/run.js",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "package": "node esbuild.mjs --production"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^2.5.2",
+    "@types/node": "^24.6.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.25.10",
+    "jsdom": "^26.1.0",
+    "mocha": "^11.7.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
