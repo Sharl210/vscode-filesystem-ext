@@ -118,6 +118,9 @@ function createExportRouterForTest() {
     getWorkspaces() {
       return [workspace];
     },
+    getInitialLocation() {
+      return null;
+    },
     getConnectionInfo() {
       return {
         kind: 'local' as const,

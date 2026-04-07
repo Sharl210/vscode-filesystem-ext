@@ -129,6 +129,14 @@ function createRouterForTest() {
     getWorkspaces() {
       return [workspace, localRoot];
     },
+    getInitialLocation() {
+      return {
+        rootId: workspace.id,
+        path: 'src/components',
+        activeFilePath: 'src/components/App.tsx',
+        expandedPaths: ['', 'src', 'src/components']
+      };
+    },
     getConnectionInfo() {
       return {
         kind: 'remote' as const,
@@ -250,6 +258,12 @@ describe('router', () => {
       ok: true,
       data: {
         accessToken: 'secret-token',
+        initialLocation: {
+          rootId: 'ws_demo',
+          path: 'src/components',
+          activeFilePath: 'src/components/App.tsx',
+          expandedPaths: ['', 'src', 'src/components']
+        },
         items: [workspace, localRoot],
         connection: {
           kind: 'remote',

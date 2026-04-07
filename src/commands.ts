@@ -7,6 +7,7 @@ import { createStaticAssets } from './server/staticAssets';
 import { createDisguiseImageSettingsStore } from './state/disguiseImageSettings';
 import { createExportJobsManager } from './state/exportJobs';
 import { createServiceState } from './state/serviceState';
+import type { InitialLocationDto, WorkspaceItemDto } from './types/api';
 import { collectAccessibleRoots } from './workspace/accessibleRoots';
 import { resolveConnectionInfo } from './workspace/connectionInfo';
 import { createFileService } from './workspace/fileService';
@@ -32,6 +33,9 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     auth: authState,
     getWorkspaces() {
       return syncWorkspaceRegistry(workspaceRegistry);
+    },
+    getInitialLocation() {
+      return getInitialLocation(workspaceRegistry);
     },
     getConnectionInfo() {
       return getConnectionInfo();
@@ -134,6 +138,79 @@ function getConnectionInfo() {
     hostName: os.hostname(),
     workspaceAuthorities: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.authority)
   });
+}
+
+function getInitialLocation(workspaceRegistry: ReturnType<typeof createWorkspaceRegistry>): InitialLocationDto | null {
+  const activeUri = vscode.window.activeTextEditor?.document.uri.toString();
+  if (!activeUri) {
+    return null;
+  }
+
+  const workspaces = syncWorkspaceRegistry(workspaceRegistry);
+  const matchedWorkspace = workspaces
+    .map((workspace) => ({
+      workspace,
+      relativePath: getRelativePath(workspace.uri, activeUri)
+    }))
+    .filter((entry): entry is { workspace: WorkspaceItemDto; relativePath: string } => entry.relativePath !== null)
+    .sort((left, right) => right.workspace.uri.length - left.workspace.uri.length)[0];
+
+  if (!matchedWorkspace) {
+    return null;
+  }
+
+  const activeFilePath = normalizeRelativePath(matchedWorkspace.relativePath);
+  const path = getParentPath(activeFilePath);
+
+  return {
+    rootId: matchedWorkspace.workspace.id,
+    path,
+    activeFilePath: activeFilePath || null,
+    expandedPaths: collectExpandedPaths(path)
+  };
+}
+
+function getRelativePath(rootUri: string, targetUri: string): string | null {
+  const rootUrl = new URL(rootUri);
+  const targetUrl = new URL(targetUri);
+  if (rootUrl.protocol !== targetUrl.protocol || rootUrl.host !== targetUrl.host) {
+    return null;
+  }
+
+  const normalizedRootPath = rootUrl.pathname.replace(/\/$/, '');
+  if (targetUrl.pathname === normalizedRootPath) {
+    return '';
+  }
+
+  const prefix = `${normalizedRootPath}/`;
+  if (!targetUrl.pathname.startsWith(prefix)) {
+    return null;
+  }
+
+  return decodeURIComponent(targetUrl.pathname.slice(prefix.length));
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.replace(/^\/+/, '').replace(/\/+/g, '/');
+}
+
+function getParentPath(path: string): string {
+  const segments = normalizeRelativePath(path).split('/').filter(Boolean);
+  segments.pop();
+  return segments.join('/');
+}
+
+function collectExpandedPaths(path: string): string[] {
+  const segments = normalizeRelativePath(path).split('/').filter(Boolean);
+  const expandedPaths = [''];
+  let currentPath = '';
+
+  for (const segment of segments) {
+    currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+    expandedPaths.push(currentPath);
+  }
+
+  return expandedPaths;
 }
 
 function createVsCodeFileSystemAdapter() {

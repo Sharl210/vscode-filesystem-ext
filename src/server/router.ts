@@ -5,6 +5,7 @@ import type {
   ExportJobSnapshotDto,
   FileEntryDto,
   GetFileResponseDto,
+  InitialLocationDto,
   WorkspaceItemDto
 } from '../types/api';
 import { normalizeEntryName } from '../utils/nameValidation';
@@ -50,6 +51,7 @@ export interface RouterRequest {
 interface RouterDependencies {
   auth: AuthState;
   getWorkspaces(): WorkspaceItemDto[];
+  getInitialLocation(): InitialLocationDto | null;
   getConnectionInfo(): ConnectionInfoDto;
   getWorkspaceById(id: string): WorkspaceItemDto | undefined;
   getDisguiseImageSettings(): Promise<DisguiseImageSettingsDto>;
@@ -104,6 +106,7 @@ export function createRouter(dependencies: RouterDependencies) {
       if (url.pathname === '/api/workspaces' && request.method === 'GET') {
         return sendJsonSuccess({
           accessToken: dependencies.auth.token,
+          initialLocation: dependencies.getInitialLocation(),
           items: dependencies.getWorkspaces(),
           connection: dependencies.getConnectionInfo()
         });
