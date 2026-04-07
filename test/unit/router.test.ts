@@ -192,6 +192,20 @@ describe('router', () => {
     expect(response.status).toBe(401);
   });
 
+  it('accepts api requests with token in query string', async () => {
+    const { router } = createRouterForTest();
+
+    const response = await router.handle({
+      method: 'GET',
+      url: '/api/workspaces?token=secret-token',
+      headers: {},
+      body: new Uint8Array()
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.jsonBody).toMatchObject({ ok: true });
+  });
+
   it('redirects root token requests and sets auth cookie', async () => {
     const { router } = createRouterForTest();
 
@@ -234,9 +248,10 @@ describe('router', () => {
     expect(response.status).toBe(200);
     expect(response.jsonBody).toEqual({
       ok: true,
-        data: {
-          items: [workspace, localRoot],
-          connection: {
+      data: {
+        accessToken: 'secret-token',
+        items: [workspace, localRoot],
+        connection: {
           kind: 'remote',
           label: '远程 · ssh-remote · prod-server',
           host: 'ubuntu-devbox',

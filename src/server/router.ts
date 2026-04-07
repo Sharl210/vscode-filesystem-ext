@@ -97,12 +97,13 @@ export function createRouter(dependencies: RouterDependencies) {
         return sendNotFound();
       }
 
-      if (!dependencies.auth.validateRequest(request.headers)) {
+      if (!dependencies.auth.validateRequest(request.headers, url)) {
         return sendJsonError('UNAUTHORIZED', '缺少有效的访问凭据');
       }
 
       if (url.pathname === '/api/workspaces' && request.method === 'GET') {
         return sendJsonSuccess({
+          accessToken: dependencies.auth.token,
           items: dependencies.getWorkspaces(),
           connection: dependencies.getConnectionInfo()
         });

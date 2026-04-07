@@ -2,17 +2,21 @@ import crypto from 'node:crypto';
 
 export interface AuthState {
   token: string;
-  validateRequest(headers: Record<string, string | undefined>): boolean;
+  validateRequest(headers: Record<string, string | undefined>, url?: URL): boolean;
   validateUiToken(url: URL): boolean;
 }
 
 export function createAuthState(token: string = crypto.randomUUID()): AuthState {
   return {
     token,
-    validateRequest(headers) {
+    validateRequest(headers, url) {
       const authorization = headers.authorization ?? headers.Authorization;
 
       if (authorization === `Bearer ${token}`) {
+        return true;
+      }
+
+      if (url?.searchParams.get('token') === token) {
         return true;
       }
 
