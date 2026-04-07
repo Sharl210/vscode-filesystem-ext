@@ -37,6 +37,20 @@ export interface ConnectionInfoDto {
   authority: string | null;
 }
 
+export interface InitialLocationDto {
+  rootId: string;
+  path: string;
+  activeFilePath: string | null;
+  expandedPaths: string[];
+}
+
+export interface WorkspacesResponseDto {
+  accessToken: string;
+  initialLocation: InitialLocationDto | null;
+  items: WorkspaceItemDto[];
+  connection: ConnectionInfoDto;
+}
+
 export interface FileEntryDto {
   name: string;
   path: string;
