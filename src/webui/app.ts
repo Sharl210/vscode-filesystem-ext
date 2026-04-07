@@ -172,6 +172,7 @@ const exportProgressCancelButton = requireElement<HTMLButtonElement>('#exportPro
 const state = {
   roots: [] as WorkspaceItem[],
   connection: null as ConnectionInfo | null,
+  accessToken: '',
   currentRootId: '',
   currentPath: '',
   currentEntries: [] as FileEntry[],
@@ -221,13 +222,13 @@ bindEvents();
 void bootstrap().catch(handleUiError);
 
 async function bootstrap() {
-  const response = await api<{ items: WorkspaceItem[]; connection: ConnectionInfo }>('/api/workspaces');
+  const response = await api<{ accessToken: string; items: WorkspaceItem[]; connection: ConnectionInfo }>('/api/workspaces');
 
+  state.accessToken = response.accessToken;
   state.roots = response.items;
   state.connection = response.connection;
   state.currentRootId = pickInitialRootId(response.items);
   state.currentPath = '';
-  state.expandedNodes.add(treeNodeKey(state.currentRootId, ''));
 
   renderConnection();
   await loadDirectory(state.currentRootId, '', { renderTreeAfter: true });
@@ -443,7 +444,7 @@ function renderTreeNode(rootId: string, label: string, path: string, iconType: '
   const toggle = document.createElement('button');
   toggle.className = 'tree-toggle';
   toggle.type = 'button';
-  toggle.dataset.state = iconType === 'directory' || iconType === 'folder-root' ? 'visible' : 'hidden';
+  toggle.dataset.state = path === '' || iconType === 'directory' || iconType === 'folder-root' ? 'visible' : 'hidden';
   toggle.textContent = state.expandedNodes.has(treeNodeKey(rootId, path)) ? '▾' : '▸';
   toggle.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -1211,7 +1212,7 @@ function downloadSelection() {
   }
 
   fileTargets.forEach((target) => {
-    const url = `/api/download?workspace=${encodeURIComponent(target.rootId)}&path=${encodeURIComponent(target.path)}`;
+    const url = withAccessToken(`/api/download?workspace=${encodeURIComponent(target.rootId)}&path=${encodeURIComponent(target.path)}`);
     window.open(url, '_blank', 'noopener,noreferrer');
   });
 }
@@ -1240,7 +1241,7 @@ async function exportSelection(format: 'archive' | 'disguised-image') {
     cancelAction: async () => {
       downloadController.abort();
       if (currentJobId) {
-        await fetch(`/api/export/jobs/${encodeURIComponent(currentJobId)}/cancel`, {
+        await fetch(withAccessToken(`/api/export/jobs/${encodeURIComponent(currentJobId)}/cancel`), {
           method: 'POST',
           headers: { 'content-type': 'application/json' }
         }).catch(() => undefined);
@@ -1261,6 +1262,12 @@ async function exportSelection(format: 'archive' | 'disguised-image') {
       })
     });
     currentJobId = started.jobId;
+
+    if (downloadController.signal.aborted || token !== state.progressDialog.activeToken) {
+      await fetch(withAccessToken(`/api/export/jobs/${encodeURIComponent(currentJobId)}/cancel`), { method: 'POST' }).catch(() => undefined);
+      return;
+    }
+
     applyExportSnapshot(token, title, started);
     await pollExportJob(token, title, started.jobId, downloadController);
   } catch (error) {
@@ -1274,7 +1281,7 @@ async function exportSelection(format: 'archive' | 'disguised-image') {
 }
 
 function downloadTab(tab: TabState) {
-  const url = `/api/download?workspace=${encodeURIComponent(tab.rootId)}&path=${encodeURIComponent(tab.path)}`;
+  const url = withAccessToken(`/api/download?workspace=${encodeURIComponent(tab.rootId)}&path=${encodeURIComponent(tab.path)}`);
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -1597,6 +1604,8 @@ async function pollExportJob(token: number, title: string, jobId: string, downlo
     applyExportSnapshot(token, title, snapshot);
   }
 
+  throwIfOperationCancelled(token, downloadController.signal);
+
   if (snapshot.status === 'completed') {
     updateProgressDialog(token, {
       stage: 'downloading',
@@ -1608,7 +1617,7 @@ async function pollExportJob(token: number, title: string, jobId: string, downlo
     });
     state.progressDialog.cancelAction = async () => {
       downloadController.abort();
-      await fetch(`/api/export/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }).catch(() => undefined);
+      await fetch(withAccessToken(`/api/export/jobs/${encodeURIComponent(jobId)}/cancel`), { method: 'POST' }).catch(() => undefined);
       closeProgressDialog();
       setStatus(`${title}已取消。`);
     };
@@ -1624,7 +1633,7 @@ async function pollExportJob(token: number, title: string, jobId: string, downlo
 }
 
 async function downloadCompletedExport(token: number, title: string, jobId: string, signal: AbortSignal) {
-  const response = await fetch(`/api/export/jobs/${encodeURIComponent(jobId)}/download`, { signal });
+  const response = await fetch(withAccessToken(`/api/export/jobs/${encodeURIComponent(jobId)}/download`), { signal });
   if (!response.ok) {
     throw new Error(`下载失败：${response.status}`);
   }
@@ -1673,6 +1682,17 @@ function throwIfOperationCancelled(token: number, signal: AbortSignal) {
 
 function wait(timeoutMs: number) {
   return new Promise((resolve) => setTimeout(resolve, timeoutMs));
+}
+
+function withAccessToken(url: string) {
+  if (!state.accessToken) {
+    return url;
+  }
+
+  const [pathname, search = ''] = url.split('?');
+  const params = new URLSearchParams(search);
+  params.set('token', state.accessToken);
+  return `${pathname}?${params.toString()}`;
 }
 
 async function resolveUploadTarget(targetOverride?: UploadTarget): Promise<UploadTarget | null> {
@@ -2124,7 +2144,7 @@ function loadImage(source: string) {
 }
 
 async function fetchPreviewBlob(rootId: string, path: string, mimeType: string) {
-  const response = await fetch(`/api/download?workspace=${encodeURIComponent(rootId)}&path=${encodeURIComponent(path)}`);
+  const response = await fetch(withAccessToken(`/api/download?workspace=${encodeURIComponent(rootId)}&path=${encodeURIComponent(path)}`));
   if (!response.ok) {
     throw new Error(`预览加载失败：${response.status}`);
   }
@@ -2136,7 +2156,7 @@ async function fetchPreviewBlob(rootId: string, path: string, mimeType: string) 
 }
 
 async function fetchTextDownload(rootId: string, path: string) {
-  const response = await fetch(`/api/download?workspace=${encodeURIComponent(rootId)}&path=${encodeURIComponent(path)}`);
+  const response = await fetch(withAccessToken(`/api/download?workspace=${encodeURIComponent(rootId)}&path=${encodeURIComponent(path)}`));
   if (!response.ok) {
     throw new Error(`文本加载失败：${response.status}`);
   }

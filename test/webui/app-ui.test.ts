@@ -88,6 +88,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -210,6 +211,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -291,7 +293,7 @@ describe('webui entry actions', () => {
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
 
-      if (url === '/api/export/jobs/job-1/download' && method === 'GET') {
+      if (url === '/api/export/jobs/job-1/download?token=secret-token' && method === 'GET') {
         operations.push('download-job');
         return new Response(new Uint8Array([1, 2, 3]), {
           status: 200,
@@ -326,6 +328,122 @@ describe('webui entry actions', () => {
     expect(document.querySelector<HTMLDivElement>('#exportProgressCurrentMessage')?.textContent).toContain('已完成');
   });
 
+  it('cancels an export job with token even when the user cancels before the job id arrives', async () => {
+    const operations: string[] = [];
+    let resolveStartJob: ((value: Response) => void) | null = null;
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = init?.method ?? 'GET';
+
+      if (url === '/api/workspaces') {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
+            connection: { kind: 'remote', label: '远程 · test', host: 'test', remoteName: 'ssh-remote', authority: 'ssh-remote+test' }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+
+      if (url.startsWith('/api/tree')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [{ name: 'sample.txt', path: 'sample.txt', type: 'file', size: 5, mtime: 1, mimeType: 'text/plain', isText: true, downloadable: true }]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+
+      if (url.startsWith('/api/file?')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          data: {
+            file: {
+              name: 'sample.txt',
+              path: 'sample.txt',
+              type: 'file',
+              size: 5,
+              mtime: 1,
+              mimeType: 'text/plain',
+              isText: true,
+              downloadable: true
+            },
+            content: 'hello',
+            editable: true
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+
+      if (url === '/api/export/jobs' && method === 'POST') {
+        operations.push('start-job');
+        return new Promise<Response>((resolve) => {
+          resolveStartJob = resolve;
+        });
+      }
+
+      if (url === '/api/export/jobs/job-early/cancel?token=secret-token' && method === 'POST') {
+        operations.push('cancel-job');
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { cancelled: true } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }));
+      }
+
+      if (url === '/api/export/jobs/job-early' && method === 'GET') {
+        operations.push('poll-job');
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: {
+          jobId: 'job-early', status: 'running', format: 'archive', progress: 5, stage: 'preparing', currentMessage: 'running', messages: ['running'], fileName: null, error: null
+        } }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+
+    document.querySelector<HTMLElement>('.file-row')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    document.querySelector<HTMLButtonElement>('#exportArchiveButton')?.click();
+    await flush();
+
+    document.querySelector<HTMLButtonElement>('#exportProgressCancelButton')?.click();
+    await flush();
+
+    const startJobResolver: (value: Response) => void = resolveStartJob ?? (() => {
+      throw new Error('export start resolver not captured');
+    });
+
+    startJobResolver(new Response(JSON.stringify({
+      ok: true,
+      data: {
+        jobId: 'job-early',
+        status: 'running',
+        format: 'archive',
+        progress: 5,
+        stage: 'preparing',
+        currentMessage: '正在准备导出',
+        messages: ['正在准备导出'],
+        fileName: null,
+        error: null
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    await flush();
+    await flush();
+
+    expect(operations).toContain('start-job');
+    expect(operations).toContain('cancel-job');
+    expect(operations).not.toContain('poll-job');
+    expect(document.querySelector<HTMLDivElement>('#exportProgressDialog')?.hidden).toBe(true);
+  });
+
   it('downloads multiple selected files as individual browser downloads', async () => {
     const openMock = vi.fn();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -335,6 +453,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -373,16 +492,236 @@ describe('webui entry actions', () => {
 
     expect(openMock).toHaveBeenNthCalledWith(
       1,
-      '/api/download?workspace=workspace-root&path=a.txt',
+      '/api/download?workspace=workspace-root&path=a.txt&token=secret-token',
       '_blank',
       'noopener,noreferrer'
     );
     expect(openMock).toHaveBeenNthCalledWith(
       2,
-      '/api/download?workspace=workspace-root&path=b.txt',
+      '/api/download?workspace=workspace-root&path=b.txt&token=secret-token',
       '_blank',
       'noopener,noreferrer'
     );
+  });
+
+  it('uses the access token when loading preview blobs for remote-friendly file previews', async () => {
+    const operations: string[] = [];
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: vi.fn(() => 'blob:preview'),
+      configurable: true,
+      writable: true
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/workspaces') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
+            connection: { kind: 'remote', label: '远程 · test', host: 'test', remoteName: 'ssh-remote', authority: 'ssh-remote+test' }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.startsWith('/api/tree')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [
+              { name: 'photo.png', path: 'photo.png', type: 'file', size: 4, mtime: 1, mimeType: 'image/png', isText: false, downloadable: true }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.startsWith('/api/file?')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            file: {
+              name: 'photo.png',
+              path: 'photo.png',
+              type: 'file',
+              size: 4,
+              mtime: 1,
+              mimeType: 'image/png',
+              isText: false,
+              downloadable: true
+            },
+            editable: false
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/download?workspace=workspace-root&path=photo.png&token=secret-token') {
+        operations.push('preview-download');
+        return new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' }
+        });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+
+    document.querySelector<HTMLElement>('.file-row')?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await flush();
+
+    expect(operations).toEqual(['preview-download']);
+  });
+
+  it('uses the access token when loading read-only text fallback content', async () => {
+    const operations: string[] = [];
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: vi.fn(() => 'blob:text-preview'),
+      configurable: true,
+      writable: true
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/workspaces') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
+            connection: { kind: 'remote', label: '远程 · test', host: 'test', remoteName: 'ssh-remote', authority: 'ssh-remote+test' }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.startsWith('/api/tree')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [
+              { name: 'readonly.log', path: 'readonly.log', type: 'file', size: 12, mtime: 1, mimeType: 'text/plain', isText: true, downloadable: true }
+            ]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.startsWith('/api/file?')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            file: {
+              name: 'readonly.log',
+              path: 'readonly.log',
+              type: 'file',
+              size: 12,
+              mtime: 1,
+              mimeType: 'text/plain',
+              isText: true,
+              downloadable: true
+            },
+            editable: false
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === '/api/download?workspace=workspace-root&path=readonly.log&token=secret-token') {
+        operations.push('text-download');
+        return new Response('readonly body', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' }
+        });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+
+    document.querySelector<HTMLElement>('.file-row')?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await flush();
+
+    expect(operations).toEqual(['text-download', 'text-download']);
+    expect(document.querySelector<HTMLTextAreaElement>('#viewerSurface textarea')?.value).toBe('readonly body');
+  });
+
+  it('does not expand local roots by default and allows toggling them open and closed', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/workspaces') {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            accessToken: 'secret-token',
+            items: [
+              { id: 'local-c', name: '本机根目录 (C:)', uri: 'file:///C:/', source: 'local' },
+              { id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }
+            ],
+            connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.startsWith('/api/tree?workspace=workspace-root')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [{ name: 'src', path: 'src', type: 'directory', size: 0, mtime: 1, mimeType: 'inode/directory', isText: false, downloadable: false }]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.startsWith('/api/tree?workspace=local-c')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            path: '',
+            items: [{ name: 'Users', path: 'Users', type: 'directory', size: 0, mtime: 1, mimeType: 'inode/directory', isText: false, downloadable: false }]
+          }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('prompt', vi.fn(() => 'ignored.txt'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    await import('../../src/webui/app.js');
+    await flush();
+
+    const toggles = Array.from(document.querySelectorAll<HTMLButtonElement>('.tree-toggle'));
+    expect(toggles[0]?.dataset.state).toBe('visible');
+    expect(document.querySelector('.tree-list .tree-list .tree-list')).toBeNull();
+
+    toggles[0]?.click();
+    await flush();
+    expect(document.body.textContent).toContain('Users');
+
+    const refreshedToggles = Array.from(document.querySelectorAll<HTMLButtonElement>('.tree-toggle'));
+    refreshedToggles[0]?.click();
+    await flush();
+    expect(document.body.textContent).not.toContain('Users');
   });
 
   it('supports marquee selection across file rows', async () => {
@@ -393,6 +732,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -424,7 +764,10 @@ describe('webui entry actions', () => {
     await import('../../src/webui/app.js');
     await flush();
 
-    const list = document.querySelector<HTMLDivElement>('#fileList')!;
+    const list = document.querySelector<HTMLDivElement>('#fileList');
+    if (!list) {
+      throw new Error('fileList not found');
+    }
     Object.defineProperty(list, 'getBoundingClientRect', {
       value: () => ({ left: 0, top: 0, right: 400, bottom: 400, width: 400, height: 400 })
     });
@@ -455,6 +798,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -485,7 +829,10 @@ describe('webui entry actions', () => {
     await import('../../src/webui/app.js');
     await flush();
 
-    const selectAll = document.querySelector<HTMLInputElement>('#selectAllCheckbox')!;
+    const selectAll = document.querySelector<HTMLInputElement>('#selectAllCheckbox');
+    if (!selectAll) {
+      throw new Error('selectAllCheckbox not found');
+    }
     selectAll.checked = true;
     selectAll.dispatchEvent(new Event('change', { bubbles: true }));
     await flush();
@@ -506,6 +853,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -615,6 +963,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -691,6 +1040,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -746,6 +1096,7 @@ describe('webui entry actions', () => {
         return Promise.resolve(new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -815,6 +1166,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
@@ -884,6 +1236,7 @@ describe('webui entry actions', () => {
         return new Response(JSON.stringify({
           ok: true,
           data: {
+            accessToken: 'secret-token',
             items: [{ id: 'workspace-root', name: '工作区 · demo', uri: 'file:///demo', source: 'workspace' }],
             connection: { kind: 'local', label: '本机 · test', host: 'test', remoteName: null, authority: null }
           }
