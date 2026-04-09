@@ -59,6 +59,42 @@ function createRouterForTest() {
       renameEntry: vi.fn(),
       copyEntry: vi.fn(),
       moveEntry: vi.fn()
+    },
+    exports: {
+      startJob: vi.fn(() => ({
+        jobId: 'job-1',
+        status: 'running',
+        format: 'archive',
+        progress: 10,
+        stage: 'preparing',
+        currentMessage: 'running',
+        messages: ['running'],
+        fileName: null,
+        error: null
+      })),
+      getJob: vi.fn(() => null),
+      getDownload: vi.fn(() => ({
+        data: new TextEncoder().encode('archive-bytes'),
+        mimeType: 'application/x-tar',
+        fileName: 'archive.tar'
+      })),
+      consumeDownload: vi.fn(() => ({
+        data: new TextEncoder().encode('archive-bytes'),
+        mimeType: 'application/x-tar',
+        fileName: 'archive.tar'
+      })),
+      cancelJob: vi.fn(() => true)
+    },
+    terminal: {
+      execute: vi.fn(async () => ({
+        command: 'pwd',
+        cwd: '/workspace/demo',
+        exitCode: 0,
+        stdout: '/workspace/demo\n',
+        stderr: '',
+        combinedOutput: '/workspace/demo\n',
+        timedOut: false
+      }))
     }
   };
 
@@ -134,8 +170,115 @@ describe('mcp router', () => {
         tools: expect.arrayContaining([
           expect.objectContaining({
             name: 'list_workspaces'
+          }),
+          expect.objectContaining({
+            name: 'create_file'
+          }),
+          expect.objectContaining({
+            name: 'terminal_execute'
           })
         ])
+      }
+    });
+  });
+
+  it('exposes file mutation, export job, and terminal fallback tools', async () => {
+    const router = createRouterForTest();
+
+    const fileResponse = await router.handle({
+      method: 'POST',
+      url: '/mcp',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: new TextEncoder().encode(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'create_file',
+          arguments: {
+            workspaceId: 'ws_demo',
+            path: 'src/new.ts'
+          }
+        }
+      }))
+    });
+
+    expect(fileResponse.status).toBe(200);
+    expect(fileResponse.jsonBody).toMatchObject({
+      jsonrpc: '2.0',
+      id: 3,
+      result: {
+        structuredContent: {
+          created: true,
+          path: 'src/new.ts'
+        }
+      }
+    });
+
+    const exportResponse = await router.handle({
+      method: 'POST',
+      url: '/mcp',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: new TextEncoder().encode(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: {
+          name: 'start_export_job',
+          arguments: {
+            workspaceId: 'ws_demo',
+            format: 'archive',
+            paths: ['src']
+          }
+        }
+      }))
+    });
+
+    expect(exportResponse.status).toBe(200);
+    expect(exportResponse.jsonBody).toMatchObject({
+      jsonrpc: '2.0',
+      id: 4,
+      result: {
+        structuredContent: {
+          jobId: 'job-1'
+        }
+      }
+    });
+
+    const terminalResponse = await router.handle({
+      method: 'POST',
+      url: '/mcp',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: new TextEncoder().encode(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: {
+          name: 'terminal_execute',
+          arguments: {
+            workspaceId: 'ws_demo',
+            command: 'pwd'
+          }
+        }
+      }))
+    });
+
+    expect(terminalResponse.status).toBe(200);
+    expect(terminalResponse.jsonBody).toMatchObject({
+      jsonrpc: '2.0',
+      id: 5,
+      result: {
+        structuredContent: {
+          command: 'pwd',
+          exitCode: 0,
+          stdout: '/workspace/demo\n'
+        }
       }
     });
   });
