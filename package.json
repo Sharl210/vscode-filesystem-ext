@@ -2,7 +2,7 @@
   "name": "vscode-filesystem-ext",
   "displayName": "vscode-filesystem-ext",
   "description": "通过本地网页网关暴露当前 VS Code 已打开的工作区文件。",
-  "version": "5.0.0",
+  "version": "0.0.5",
   "publisher": "local",
   "private": true,
   "license": "PolyForm Noncommercial 1.0.0",
