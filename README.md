@@ -18,7 +18,7 @@
 
 ## 安装说明
 
-1. 下载 Release 中的 `vscode-filesystem-ext-0.0.4.vsix`
+1. 下载 Release 中的 `vscode-filesystem-ext-5.0.0.vsix`
 2. 打开 VS Code
 3. 进入扩展面板
 4. 右上角菜单选择“从 VSIX 安装”
@@ -27,7 +27,7 @@
 也可以命令行安装：
 
 ```bash
-code --install-extension vscode-filesystem-ext-0.0.4.vsix
+code --install-extension vscode-filesystem-ext-5.0.0.vsix
 ```
 
 ## 使用说明
@@ -55,32 +55,31 @@ code --install-extension vscode-filesystem-ext-0.0.4.vsix
 - 底层固定使用 ZIP 归档，优先兼容性和速度，不追求高压缩率
 - 可在齿轮设置中选择内置封面或自定义图片
 
-### 通过 VS Code 终端启动 MCP 服务
+### 启动/对接 MCP HTTP 单实例服务
 
-扩展提供命令：`工作区网页网关：通过终端启动 MCP 服务`（`workspaceWebGateway.startMcpServer`）。
+扩展提供命令：`工作区网页网关：启动/获取 MCP HTTP 入口`（`workspaceWebGateway.startMcpServer`）。
 
-该命令会先确保网关服务已启动，然后使用 **VS Code Terminal API** 创建终端并拉起 MCP 进程。也就是说，终端执行者始终是 VS Code，而不是插件直接调用系统终端。
+该命令会启动或复用一个 **MCP 单实例 HTTP 服务**，默认监听 `127.0.0.1:21080`，并把入口地址复制到剪贴板。多个 VS Code 窗口会共享同一个 MCP 端口实例。
+
+MCP HTTP 入口默认**无需鉴权**，可直接对接使用。
+
+注意：这不会改变 Web UI 网关原本的随机端口策略；Web UI 仍按原行为启动。
 
 可在 VS Code `settings.json` 中配置：
 
 ```json
 {
-  "workspaceWebGateway.mcpServer.command": "node",
-  "workspaceWebGateway.mcpServer.args": ["./dist/mcp-server.js"],
-  "workspaceWebGateway.mcpServer.cwd": "/path/to/mcp-project",
-  "workspaceWebGateway.mcpServer.env": {
-    "MCP_TRANSPORT": "stdio"
-  },
-  "workspaceWebGateway.mcpServer.terminalName": "Workspace Web Gateway MCP"
+  "workspaceWebGateway.mcp.host": "127.0.0.1",
+  "workspaceWebGateway.mcp.port": 21080,
+  "workspaceWebGateway.mcp.path": "/mcp"
 }
 ```
 
-启动时会额外注入以下环境变量给 MCP 进程：
+默认 MCP 入口示例：
 
-- `WORKSPACE_WEB_GATEWAY_TOKEN`
-- `WORKSPACE_WEB_GATEWAY_LOCAL_URL`
-- `WORKSPACE_WEB_GATEWAY_URL`
-- `WORKSPACE_WEB_GATEWAY_PORT`
+```text
+http://127.0.0.1:21080/mcp
+```
 
 #### Claude Desktop（`mcpServers` JSON 写法）
 
@@ -90,17 +89,13 @@ code --install-extension vscode-filesystem-ext-0.0.4.vsix
 {
   "mcpServers": {
     "workspace-web-gateway-mcp": {
-      "command": "node",
-      "args": ["./dist/mcp-server.js"],
-      "env": {
-        "MCP_TRANSPORT": "stdio"
-      }
+      "url": "http://127.0.0.1:21080/mcp"
     }
   }
 }
 ```
 
-说明：上面这段是客户端侧 `mcpServers` 风格示例。对于本扩展，真正执行 MCP 进程仍由 `workspaceWebGateway.startMcpServer` 命令通过 VS Code 终端拉起。
+说明：上面这段是客户端侧 `mcpServers` 风格示例。对于本扩展，`workspaceWebGateway.startMcpServer` 命令会确保回环地址上的 MCP HTTP 单实例可用。
 
 #### Codex CLI（`mcp_servers` TOML 写法）
 
@@ -108,24 +103,10 @@ code --install-extension vscode-filesystem-ext-0.0.4.vsix
 
 ```toml
 [mcp_servers.workspace_web_gateway_mcp]
-command = "node"
-args = ["./dist/mcp-server.js"]
-cwd = "/path/to/mcp-project"
-
-[mcp_servers.workspace_web_gateway_mcp.env]
-MCP_TRANSPORT = "stdio"
+url = "http://127.0.0.1:21080/mcp"
 ```
 
-如果需要把扩展注入的网关变量继续透传给下游进程，也可以在这里补充：
-
-```toml
-[mcp_servers.workspace_web_gateway_mcp.env]
-MCP_TRANSPORT = "stdio"
-WORKSPACE_WEB_GATEWAY_TOKEN = "..."
-WORKSPACE_WEB_GATEWAY_LOCAL_URL = "..."
-WORKSPACE_WEB_GATEWAY_URL = "..."
-WORKSPACE_WEB_GATEWAY_PORT = "..."
-```
+这里推荐使用 `url` 对接回环地址上的 MCP Streamable HTTP 服务。
 
 ## 开发与验证
 

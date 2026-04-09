@@ -2,7 +2,7 @@
   "name": "vscode-filesystem-ext",
   "displayName": "vscode-filesystem-ext",
   "description": "通过本地网页网关暴露当前 VS Code 已打开的工作区文件。",
-  "version": "0.0.4",
+  "version": "5.0.0",
   "publisher": "local",
   "private": true,
   "license": "PolyForm Noncommercial 1.0.0",
@@ -52,42 +52,26 @@
       },
       {
         "command": "workspaceWebGateway.startMcpServer",
-        "title": "工作区网页网关：通过终端启动 MCP 服务"
+        "title": "工作区网页网关：启动/获取 MCP HTTP 入口"
       }
     ],
     "configuration": {
       "title": "Workspace Web Gateway",
       "properties": {
-        "workspaceWebGateway.mcpServer.command": {
+        "workspaceWebGateway.mcp.host": {
           "type": "string",
-          "default": "",
-          "description": "用于启动 MCP 服务的命令。该命令将通过 VS Code 终端执行。"
+          "default": "127.0.0.1",
+          "description": "MCP HTTP 服务监听地址。为了外部工具可控接入，仅允许回环地址。"
         },
-        "workspaceWebGateway.mcpServer.args": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "description": "启动 MCP 服务命令的参数列表。"
+        "workspaceWebGateway.mcp.port": {
+          "type": "number",
+          "default": 21080,
+          "description": "MCP HTTP 服务端口。默认固定为 21080，用于多窗口共享单实例。"
         },
-        "workspaceWebGateway.mcpServer.cwd": {
+        "workspaceWebGateway.mcp.path": {
           "type": "string",
-          "default": "",
-          "description": "启动 MCP 服务时终端的工作目录，留空表示使用 VS Code 默认终端目录。"
-        },
-        "workspaceWebGateway.mcpServer.env": {
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "注入到 MCP 终端进程的额外环境变量。"
-        },
-        "workspaceWebGateway.mcpServer.terminalName": {
-          "type": "string",
-          "default": "Workspace Web Gateway MCP",
-          "description": "启动 MCP 服务时创建的 VS Code 终端名称。"
+          "default": "/mcp",
+          "description": "MCP Streamable HTTP 入口路径。"
         }
       }
     }
