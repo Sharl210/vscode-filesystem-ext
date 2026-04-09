@@ -8,12 +8,42 @@ interface TerminalExecutorOptions {
 export function createTerminalExecutor(options: TerminalExecutorOptions): GatewayTerminalExecutor {
   return {
     execute(input) {
-      return runCommand({
-        shellPath: options.shellPath,
+      return runCommandWithFallback({
+        preferredShellPath: options.shellPath,
         ...input
       });
     }
   };
+}
+
+async function runCommandWithFallback(input: {
+  preferredShellPath: string;
+  command: string;
+  cwd: string;
+  timeoutMs?: number;
+  env?: Record<string, string>;
+}): Promise<GatewayTerminalExecutionResult> {
+  const shellCandidates = buildShellCandidates(input.preferredShellPath);
+  let lastError: unknown;
+
+  for (const shellPath of shellCandidates) {
+    try {
+      return await runCommand({
+        shellPath,
+        command: input.command,
+        cwd: input.cwd,
+        timeoutMs: input.timeoutMs,
+        env: input.env
+      });
+    } catch (error) {
+      lastError = error;
+      if (!isMissingShellError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 function runCommand(input: {
@@ -78,4 +108,31 @@ function runCommand(input: {
       });
     });
   });
+}
+
+function buildShellCandidates(preferredShellPath: string): string[] {
+  const candidates = new Set<string>();
+  const push = (value: string | undefined) => {
+    if (value && value.trim()) {
+      candidates.add(value);
+    }
+  };
+
+  push(preferredShellPath);
+
+  if (process.platform === 'win32') {
+    push(process.env.ComSpec);
+    push('powershell.exe');
+    push('cmd.exe');
+  } else {
+    push('/bin/sh');
+    push('sh');
+    push('bash');
+  }
+
+  return [...candidates];
+}
+
+function isMissingShellError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
 }
