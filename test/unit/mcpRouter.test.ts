@@ -115,7 +115,7 @@ describe('mcp router', () => {
 
     expect(response.status).toBe(200);
     expect(response.jsonBody).toMatchObject({
-      name: 'workspace-web-gateway-mcp',
+      name: 'vscode-filesystem-ext-mcp',
       transport: 'streamable-http',
       endpoint: '/mcp'
     });
@@ -281,6 +281,87 @@ describe('mcp router', () => {
         }
       }
     });
+  });
+
+  it('maps terminal cwdPath to a workspace-contained filesystem path before execution', async () => {
+    const terminalExecute = vi.fn(async () => ({
+      command: 'pwd',
+      cwd: 'z:/home/harl/at_parser',
+      exitCode: 0,
+      stdout: 'z:/home/harl/at_parser\n',
+      stderr: '',
+      combinedOutput: 'z:/home/harl/at_parser\n',
+      timedOut: false
+    }));
+    const router = createMcpRouter({
+      executor: {
+        reads: {
+          getWorkspaces: vi.fn(() => []),
+          getInitialLocation: vi.fn(() => null),
+          getConnectionInfo: vi.fn(() => ({ kind: 'local', label: '本机', host: 'local', remoteName: null, authority: null })),
+          getWorkspaceById: vi.fn(() => ({
+            id: 'ws_demo',
+            name: 'demo',
+            uri: 'file:///z%3A/home/harl/at_parser',
+            source: 'workspace' as const
+          })),
+          resolveWorkspacePath: vi.fn(() => {
+            throw new Error('relative resolver should not be used for absolute cwdPath');
+          })
+        },
+        files: {
+          listDirectory: vi.fn(),
+          readTextFile: vi.fn(),
+          writeTextFile: vi.fn(),
+          readBinaryFile: vi.fn(),
+          exportArchive: vi.fn(),
+          exportDisguisedImage: vi.fn(),
+          uploadFile: vi.fn(),
+          createFile: vi.fn(),
+          writeFileBytes: vi.fn(),
+          deleteEntry: vi.fn(),
+          createDirectory: vi.fn(),
+          renameEntry: vi.fn(),
+          copyEntry: vi.fn(),
+          moveEntry: vi.fn()
+        },
+        exports: {
+          startJob: vi.fn(),
+          getJob: vi.fn(),
+          getDownload: vi.fn(),
+          consumeDownload: vi.fn(),
+          cancelJob: vi.fn()
+        },
+        terminal: {
+          execute: terminalExecute
+        }
+      } as never
+    });
+
+    const response = await router.handle({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json' },
+      body: new TextEncoder().encode(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 6,
+        method: 'tools/call',
+        params: {
+          name: 'terminal_execute',
+          arguments: {
+            workspaceId: 'ws_demo',
+            cwdPath: 'z:/home/harl/at_parser',
+            command: 'pwd'
+          }
+        }
+      }))
+    });
+
+    expect(response.status).toBe(200);
+    expect(terminalExecute).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: 'z:/home/harl/at_parser',
+      command: 'pwd'
+    }));
   });
 
   it('accepts notifications/initialized without returning a JSON-RPC error', async () => {

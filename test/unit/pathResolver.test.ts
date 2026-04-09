@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PathForbiddenError, resolveWorkspacePath } from '../../src/workspace/pathResolver';
+import { PathForbiddenError, resolveTerminalCwdPath, resolveWorkspacePath } from '../../src/workspace/pathResolver';
 
 describe('path resolver', () => {
   it('resolves an empty path to the workspace root', () => {
@@ -18,5 +18,13 @@ describe('path resolver', () => {
 
   it('rejects absolute filesystem paths', () => {
     expect(() => resolveWorkspacePath('file:///workspace/demo', '/etc/passwd')).toThrow(PathForbiddenError);
+  });
+
+  it('allows an absolute Windows path when it stays inside the workspace root', () => {
+    expect(resolveTerminalCwdPath('file:///z%3A/home/harl/at_parser', 'z:/home/harl/at_parser/src')).toBe('z:/home/harl/at_parser/src');
+  });
+
+  it('rejects an absolute Windows path when it escapes the workspace root', () => {
+    expect(() => resolveTerminalCwdPath('file:///z%3A/home/harl/at_parser', 'z:/other-project')).toThrow(PathForbiddenError);
   });
 });

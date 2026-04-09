@@ -1,6 +1,7 @@
 import type { GatewayExecutor } from '../executor/contracts';
 import type { ExportJobFormatDto } from '../types/api';
 import type { RouterResponse } from './response';
+import { resolveTerminalCwdPath } from '../workspace/pathResolver';
 
 interface McpRouterRequest {
   method: string;
@@ -26,6 +27,7 @@ interface McpToolDefinition {
 }
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
+const MCP_SERVER_NAME = 'vscode-filesystem-ext-mcp';
 
 const MCP_TOOLS: McpToolDefinition[] = [
   defineTool('list_workspaces', '返回当前网关可访问的工作区列表与连接信息。', {}),
@@ -137,7 +139,7 @@ export function createMcpRouter(dependencies: McpRouterDependencies) {
 
       if (request.method === 'GET') {
         return sendJson({
-          name: 'workspace-web-gateway-mcp',
+          name: MCP_SERVER_NAME,
           transport: 'streamable-http',
           endpoint: '/mcp',
           protocolVersion: MCP_PROTOCOL_VERSION
@@ -213,8 +215,8 @@ async function handleMethod(request: JsonRpcRequest, dependencies: McpRouterDepe
         tools: {}
       },
       serverInfo: {
-        name: 'workspace-web-gateway-mcp',
-        version: '0.0.5'
+        name: MCP_SERVER_NAME,
+        version: '0.0.6'
       }
     };
   }
@@ -439,7 +441,7 @@ async function handleToolCall(
   if (toolName === 'terminal_execute') {
     const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
     const cwdPath = getOptionalString(toolArguments, 'cwdPath');
-    const cwd = cwdPath ? resolveWorkspacePath(reads, workspace.uri, cwdPath) : workspace.uri;
+    const cwd = resolveTerminalCwdPath(workspace.uri, cwdPath);
     return terminal.execute({
       command: getRequiredString(toolArguments, 'command'),
       cwd,
