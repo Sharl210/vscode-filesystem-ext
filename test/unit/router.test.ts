@@ -56,7 +56,7 @@ function createRouterForTest() {
     }
   };
 
-  const executor = {
+    const executor = {
     reads: {
       getWorkspaces() {
         return [workspace, localRoot];
@@ -175,9 +175,22 @@ function createRouterForTest() {
     async createFile(targetUri: string) {
       calls.push(`create:${targetUri}`);
     }
-    },
-    exports: exportJobs
-  };
+      },
+      exports: exportJobs
+      ,terminal: {
+        async execute() {
+          return {
+            command: 'pwd',
+            cwd: '/workspace/demo',
+            stdout: '/workspace/demo\n',
+            stderr: '',
+            combinedOutput: '/workspace/demo\n',
+            exitCode: 0,
+            timedOut: false
+          };
+        }
+      }
+    };
 
   const router = createRouter({
     auth,
@@ -290,6 +303,11 @@ describe('router', () => {
           },
           cancelJob() {
             return false;
+          }
+        },
+        terminal: {
+          async execute() {
+            throw new Error('unused');
           }
         }
       },
