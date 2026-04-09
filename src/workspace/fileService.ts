@@ -1,7 +1,7 @@
 import type { FileEntryDto, GetFileResponseDto } from '../types/api';
 import { createDisguisedImagePayload, createTarArchive, createZipArchive, decodeDataUrlBytes, type ArchiveEntry } from '../utils/archive';
 import { detectMimeType } from '../utils/mime';
-import { decodeUtf8, encodeUtf8, isProbablyText } from '../utils/text';
+import { decodeTextContent, encodeUtf8, isProbablyText } from '../utils/text';
 import type { ExportProgressUpdate } from '../state/exportJobs';
 
 export type FileTypeValue = number;
@@ -57,7 +57,7 @@ export function createFileService(adapter: FileSystemAdapter): FileService {
           try {
             const stat = await adapter.stat(uri);
             const mimeType = type === 2 ? 'inode/directory' : detectMimeType(name);
-            const isText = type === 2 ? false : isProbablyText(await adapter.readFile(uri), mimeType);
+            const isText = type === 2 ? false : isProbablyText(await adapter.readFile(uri), mimeType, name);
 
             return createFileEntry(name, joinRelativePath(directoryPath, name), type, stat, mimeType, isText);
           } catch {
@@ -75,21 +75,15 @@ export function createFileService(adapter: FileSystemAdapter): FileService {
       const content = await adapter.readFile(fileUri);
       const name = getBaseName(relativePath);
       const mimeType = detectMimeType(name);
-      const isText = isProbablyText(content, mimeType);
+      const decoded = decodeTextContent(content, mimeType, name);
+      const isText = decoded.isText;
       const file = createFileEntry(name, relativePath, 1, stat, mimeType, isText);
-
-      if (!isText || stat.size > MAX_INLINE_EDIT_BYTES) {
-        return {
-          file,
-          editable: false
-        };
-      }
 
       return {
         file,
-        content: decodeUtf8(content),
-        encoding: 'utf-8',
-        editable: true
+        content: decoded.content,
+        encoding: decoded.encoding,
+        editable: isText && stat.size <= MAX_INLINE_EDIT_BYTES
       };
     },
     async readBinaryFile(fileUri, relativePath) {

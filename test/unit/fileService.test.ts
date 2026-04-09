@@ -24,6 +24,14 @@ function createAdapter(): FileSystemAdapter {
       }
     ],
     [
+      'file:///workspace/demo/src/at_dispatcher.c',
+      {
+        type: FILE,
+        data: new TextEncoder().encode('#include <stdio.h>\nint main(void) { return 0; }\n'),
+        mtime: 12
+      }
+    ],
+    [
       'file:///workspace/demo/src/huge.txt',
       {
         type: FILE,
@@ -40,6 +48,7 @@ function createAdapter(): FileSystemAdapter {
       }
 
       return [
+        ['at_dispatcher.c', FILE],
         ['hello.ts', FILE],
         ['logo.png', FILE],
         ['huge.txt', FILE]
@@ -83,8 +92,14 @@ describe('file service', () => {
 
     const items = await service.listDirectory('file:///workspace/demo/src', 'src');
 
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     expect(items[0]).toMatchObject({
+      name: 'at_dispatcher.c',
+      path: 'src/at_dispatcher.c',
+      type: 'file',
+      isText: true
+    });
+    expect(items[1]).toMatchObject({
       name: 'hello.ts',
       path: 'src/hello.ts',
       type: 'file',
@@ -103,14 +118,24 @@ describe('file service', () => {
     expect(result.encoding).toBe('utf-8');
   });
 
-  it('returns metadata only for binary files', async () => {
+  it('still returns string content for files that are not editable text', async () => {
     const service = createFileService(createAdapter());
 
     const result = await service.readTextFile('file:///workspace/demo/src/logo.png', 'src/logo.png');
 
-    expect(result.content).toBeUndefined();
+    expect(typeof result.content).toBe('string');
     expect(result.editable).toBe(false);
     expect(result.file.isText).toBe(false);
+  });
+
+  it('treats common source files as text even when mime mapping is missing', async () => {
+    const service = createFileService(createAdapter());
+
+    const result = await service.readTextFile('file:///workspace/demo/src/at_dispatcher.c', 'src/at_dispatcher.c');
+
+    expect(result.content).toContain('#include <stdio.h>');
+    expect(result.editable).toBe(true);
+    expect(result.file.isText).toBe(true);
   });
 
   it('returns metadata only for oversized files', async () => {
@@ -118,7 +143,7 @@ describe('file service', () => {
 
     const result = await service.readTextFile('file:///workspace/demo/src/huge.txt', 'src/huge.txt');
 
-    expect(result.content).toBeUndefined();
+    expect(typeof result.content).toBe('string');
     expect(result.editable).toBe(false);
     expect(result.file.size).toBeGreaterThan(2 * 1024 * 1024);
   });

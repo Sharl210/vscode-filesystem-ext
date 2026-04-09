@@ -65,7 +65,7 @@ export interface FileEntryDto {
 export interface GetFileResponseDto {
   file: FileEntryDto;
   content?: string;
-  encoding?: 'utf-8';
+  encoding?: string;
   editable: boolean;
 }
 
