@@ -108,6 +108,48 @@ url = "http://127.0.0.1:21080/mcp"
 
 这里推荐使用 `url` 对接回环地址上的 MCP Streamable HTTP 服务。
 
+### MCP 能力说明
+
+这个 MCP 不是“单独的文件型 MCP”或“单独的终端型 MCP”，而是**同一个 MCP 服务**同时提供：
+
+- 尽可能完整的文件工具能力
+- 一个终端执行兜底工具 `terminal_execute`
+
+当前文件类工具包括：
+
+- `list_workspaces`
+- `list_directory`
+- `read_text_file`
+- `write_text_file`
+- `read_binary_file`
+- `write_binary_file`
+- `create_file`
+- `create_directory`
+- `delete_entry`
+- `rename_entry`
+- `copy_entry`
+- `move_entry`
+- `export_archive`
+- `export_disguised_image`
+- `start_export_job`
+- `get_export_job`
+- `download_export_job`
+- `cancel_export_job`
+
+兜底工具：
+
+- `terminal_execute`
+
+#### 文件读取策略
+
+MCP 的 `read_text_file` 不再优先把文件拦成“不可编辑二进制”。现在会**尽量对所有文件返回字符串内容**：
+
+- 常见源码文件会优先按文本处理
+- 即使文件不适合内联编辑，也会尽量返回文本化后的原始内容
+- `editable` 只表示“是否适合直接编辑”，不再表示“是否能读取到内容”
+
+这意味着像 `.c` 这类源码文件，即使之前会被误判成 binary，现在也会优先把内容返回给外部模型处理。
+
 ## 开发与验证
 
 ```bash
