@@ -127,6 +127,14 @@ export function createMcpRouter(dependencies: McpRouterDependencies) {
 
       const id = payload.data.id ?? null;
 
+      if (id === null && payload.data.method === 'notifications/initialized') {
+        return {
+          status: 202,
+          headers: {},
+          body: new Uint8Array()
+        };
+      }
+
       try {
         const result = await handleMethod(payload.data, dependencies);
         return sendJson({ jsonrpc: '2.0', id, result });

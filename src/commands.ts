@@ -77,6 +77,8 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     }
   });
   const mcpRouter = createMcpRouter({ executor });
+  let mcpEndpoint: string | null = null;
+  let mcpStatusDetail: string | null = null;
 
   const ensureServiceStarted = async () => {
     const snapshot = await serviceState.ensureStarted((request) => router.handle(request));
@@ -90,18 +92,42 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
   const ensureMcpServiceStarted = async () => {
     const snapshot = await mcpServiceState.ensureStarted((request) => mcpRouter.handle(request));
     const baseUrl = new URL(snapshot.localUrl);
-    return `${baseUrl.origin}${mcpConfig.path}`;
+    mcpEndpoint = `${baseUrl.origin}${mcpConfig.path}`;
+    mcpStatusDetail = null;
+    updateStatusBar(serviceState.getSnapshot().localUrl);
+    return mcpEndpoint;
+  };
+
+  const ensureMcpServiceStartedInBackground = async () => {
+    try {
+      await ensureMcpServiceStarted();
+    } catch (error) {
+      mcpEndpoint = null;
+      mcpStatusDetail = error instanceof Error ? error.message : 'unknown error';
+      updateStatusBar(serviceState.getSnapshot().localUrl);
+    }
   };
 
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   updateStatusBar(null);
   statusBarItem.show();
+  void ensureMcpServiceStartedInBackground();
+  const mcpKeepAliveTimer = setInterval(() => {
+    void ensureMcpServiceStartedInBackground();
+  }, 5000);
+  mcpKeepAliveTimer.unref?.();
 
   function updateStatusBar(localUrl: string | null) {
+    const mcpLine = mcpEndpoint
+      ? `MCP：${mcpEndpoint}`
+      : mcpStatusDetail
+        ? `MCP：启动失败（${mcpStatusDetail}）`
+        : `MCP：准备中（目标 ${mcpConfig.host}:${mcpConfig.port}${mcpConfig.path}）`;
+
     if (!localUrl) {
       statusBarItem.command = 'workspaceWebGateway.openWebUi';
       statusBarItem.text = '$(globe) 工作区网关：启动';
-      statusBarItem.tooltip = `点击启动并打开工作区网页网关\n${getConnectionInfo().label}`;
+      statusBarItem.tooltip = `点击启动并打开工作区网页网关\n${getConnectionInfo().label}\n${mcpLine}`;
       return;
     }
 
@@ -109,7 +135,7 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     const connectionInfo = getConnectionInfo();
     statusBarItem.command = 'workspaceWebGateway.stopService';
     statusBarItem.text = `$(broadcast) 工作区网关：${url.port} 停止`;
-    statusBarItem.tooltip = `${connectionInfo.label}\n服务运行中，端口 ${url.port}。点击停止服务。`;
+    statusBarItem.tooltip = `${connectionInfo.label}\n服务运行中，端口 ${url.port}。点击停止服务。\n${mcpLine}`;
   }
 
   return [
@@ -139,6 +165,7 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     statusBarItem,
     {
       dispose() {
+        clearInterval(mcpKeepAliveTimer);
         void serviceState.stop();
         void mcpServiceState.stop();
       }

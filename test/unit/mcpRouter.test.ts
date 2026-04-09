@@ -139,4 +139,24 @@ describe('mcp router', () => {
       }
     });
   });
+
+  it('accepts notifications/initialized without returning a JSON-RPC error', async () => {
+    const router = createRouterForTest();
+
+    const response = await router.handle({
+      method: 'POST',
+      url: '/mcp',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: new TextEncoder().encode(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized'
+      }))
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.body.byteLength).toBe(0);
+    expect(response.jsonBody).toBeUndefined();
+  });
 });

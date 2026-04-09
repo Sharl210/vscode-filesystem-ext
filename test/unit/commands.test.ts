@@ -92,6 +92,14 @@ const mocked = vi.hoisted(() => {
     stop: vi.fn(),
     getSnapshot: vi.fn(() => ({ token: null, localUrl: null }))
   };
+  const mcpServiceState = {
+    ensureStarted: vi.fn(async () => ({
+      token: 'workspace-web-gateway-mcp',
+      localUrl: 'http://127.0.0.1:21080/'
+    })),
+    stop: vi.fn(),
+    getSnapshot: vi.fn(() => ({ token: null, localUrl: null }))
+  };
   const disguiseImageSettingsStore = {
     getSettings: vi.fn(async () => disguiseImageSettings),
     saveSettings: vi.fn(async () => {})
@@ -131,7 +139,9 @@ const mocked = vi.hoisted(() => {
       void dependencies;
       return router;
     }),
-    createServiceState: vi.fn(() => serviceState),
+    createServiceState: vi.fn((_factory: unknown, authToken: string) =>
+      authToken === 'workspace-web-gateway-mcp' ? mcpServiceState : serviceState
+    ),
     createStaticAssets: vi.fn(() => staticAssets),
     createStatusBarItem: vi.fn(() => statusBarItem),
     createWorkspaceRegistry: vi.fn(() => ({
@@ -166,6 +176,7 @@ const mocked = vi.hoisted(() => {
     staticAsset,
     staticAssets,
     statusBarItem,
+    mcpServiceState,
     serviceState,
     showInformationMessage,
     syncAccessibleRoots: vi.fn(() => [localWorkspace])
@@ -285,6 +296,8 @@ describe('gateway command composition', () => {
       globalState: {}
     } as never);
 
+    await Promise.resolve();
+
     expect(mocked.createServiceState).toHaveBeenCalledTimes(2);
     const mcpServiceStateCall = mocked.createServiceState.mock.calls[1];
     if (!mcpServiceStateCall) {
@@ -347,6 +360,8 @@ describe('gateway command composition', () => {
     });
     expect(mocked.staticAssets.getIndexHtml).toHaveBeenCalledTimes(1);
     expect(mocked.staticAssets.getStaticAsset).toHaveBeenCalledWith('/app.js');
+    expect(mocked.mcpServiceState.ensureStarted).toHaveBeenCalledTimes(1);
+    expect(mocked.statusBarItem.tooltip).toContain('MCP：http://127.0.0.1:21080/mcp');
   });
 
   it('starts singleton MCP HTTP service and copies endpoint to clipboard', async () => {
@@ -356,6 +371,8 @@ describe('gateway command composition', () => {
       extensionPath: '/tmp/workspace-web-gateway',
       globalState: {}
     } as never);
+
+    await Promise.resolve();
 
     const command = mocked.commandHandlers.get('workspaceWebGateway.startMcpServer');
     expect(command).toBeTypeOf('function');
@@ -367,7 +384,7 @@ describe('gateway command composition', () => {
     await command();
 
     expect(mocked.clipboardWriteText).toHaveBeenCalledTimes(1);
-    expect(mocked.clipboardWriteText).toHaveBeenCalledWith('http://127.0.0.1:3344/mcp');
-    expect(mocked.showInformationMessage).toHaveBeenCalledWith('MCP HTTP 入口已就绪并复制：http://127.0.0.1:3344/mcp');
+    expect(mocked.clipboardWriteText).toHaveBeenCalledWith('http://127.0.0.1:21080/mcp');
+    expect(mocked.showInformationMessage).toHaveBeenCalledWith('MCP HTTP 入口已就绪并复制：http://127.0.0.1:21080/mcp');
   });
 });
