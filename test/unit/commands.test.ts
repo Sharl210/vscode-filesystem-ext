@@ -76,18 +76,12 @@ const mocked = vi.hoisted(() => {
     show: vi.fn(),
     dispose: vi.fn()
   };
-  const terminal = {
-    show: vi.fn(),
-    dispose: vi.fn()
-  };
+  const clipboardWriteText = vi.fn(async () => {});
+  const showInformationMessage = vi.fn();
   const extensionConfigurationValues: Record<string, unknown> = {
-    'mcpServer.command': 'node',
-    'mcpServer.args': ['./dist/mcp-server.js'],
-    'mcpServer.cwd': '/tmp/mcp',
-    'mcpServer.env': {
-      MCP_TRANSPORT: 'stdio'
-    },
-    'mcpServer.terminalName': 'Workspace Web Gateway MCP'
+    'mcp.host': '127.0.0.1',
+    'mcp.port': 21080,
+    'mcp.path': '/mcp'
   };
   const commandHandlers = new Map<string, (...args: unknown[]) => unknown>();
   const serviceState = {
@@ -140,10 +134,10 @@ const mocked = vi.hoisted(() => {
     createServiceState: vi.fn(() => serviceState),
     createStaticAssets: vi.fn(() => staticAssets),
     createStatusBarItem: vi.fn(() => statusBarItem),
-    createTerminal: vi.fn(() => terminal),
     createWorkspaceRegistry: vi.fn(() => ({
       sync: vi.fn(() => [localWorkspace])
     })),
+    clipboardWriteText,
     commandHandlers,
     disguiseImageSettings,
     disguiseImageSettingsStore,
@@ -172,8 +166,8 @@ const mocked = vi.hoisted(() => {
     staticAsset,
     staticAssets,
     statusBarItem,
-    terminal,
     serviceState,
+    showInformationMessage,
     syncAccessibleRoots: vi.fn(() => [localWorkspace])
   };
 });
@@ -186,14 +180,13 @@ vi.mock('vscode', () => ({
     asExternalUri: vi.fn(async (uri: { toString(): string }) => uri),
     openExternal: vi.fn(),
     clipboard: {
-      writeText: vi.fn()
+      writeText: mocked.clipboardWriteText
     }
   },
   window: {
     activeTextEditor: null,
-    createTerminal: mocked.createTerminal,
     createStatusBarItem: mocked.createStatusBarItem,
-    showInformationMessage: vi.fn()
+    showInformationMessage: mocked.showInformationMessage
   },
   workspace: {
     workspaceFolders: [],
@@ -292,6 +285,22 @@ describe('gateway command composition', () => {
       globalState: {}
     } as never);
 
+    expect(mocked.createServiceState).toHaveBeenCalledTimes(2);
+    const mcpServiceStateCall = mocked.createServiceState.mock.calls[1];
+    if (!mcpServiceStateCall) {
+      throw new Error('mcp service state creation was not captured');
+    }
+
+    const mcpServiceStateOptions = mcpServiceStateCall.at(2);
+    expect(mcpServiceStateOptions).toEqual(
+      expect.objectContaining({
+        host: '127.0.0.1',
+        port: 21080,
+        includeTokenInHealthCheck: false,
+        includeTokenInLocalUrl: false
+      })
+    );
+
     expect(mocked.createLocalGatewayExecutor).toHaveBeenCalledTimes(1);
     expect(mocked.createLocalGatewayExecutor).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -340,7 +349,7 @@ describe('gateway command composition', () => {
     expect(mocked.staticAssets.getStaticAsset).toHaveBeenCalledWith('/app.js');
   });
 
-  it('starts MCP server via VS Code terminal and injects gateway env variables', async () => {
+  it('starts singleton MCP HTTP service and copies endpoint to clipboard', async () => {
     const { registerGatewayCommands } = await import('../../src/commands.js');
 
     registerGatewayCommands({
@@ -357,22 +366,8 @@ describe('gateway command composition', () => {
 
     await command();
 
-    expect(mocked.createTerminal).toHaveBeenCalledTimes(1);
-    expect(mocked.createTerminal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'Workspace Web Gateway MCP',
-        shellPath: 'node',
-        shellArgs: ['./dist/mcp-server.js'],
-        cwd: '/tmp/mcp',
-        env: expect.objectContaining({
-          MCP_TRANSPORT: 'stdio',
-          WORKSPACE_WEB_GATEWAY_TOKEN: 'shared-token',
-          WORKSPACE_WEB_GATEWAY_LOCAL_URL: 'http://127.0.0.1:3344/?token=shared-token',
-          WORKSPACE_WEB_GATEWAY_URL: 'http://127.0.0.1:3344/?token=shared-token',
-          WORKSPACE_WEB_GATEWAY_PORT: '3344'
-        })
-      })
-    );
-    expect(mocked.terminal.show).toHaveBeenCalledTimes(1);
+    expect(mocked.clipboardWriteText).toHaveBeenCalledTimes(1);
+    expect(mocked.clipboardWriteText).toHaveBeenCalledWith('http://127.0.0.1:3344/mcp');
+    expect(mocked.showInformationMessage).toHaveBeenCalledWith('MCP HTTP 入口已就绪并复制：http://127.0.0.1:3344/mcp');
   });
 });

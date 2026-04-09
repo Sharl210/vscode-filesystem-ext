@@ -16,6 +16,16 @@ const vscodeMock = vi.hoisted(() => ({
   openExternal: vi.fn(),
   copyText: vi.fn(),
   showInformationMessage: vi.fn(),
+  configurationValues: {
+    'mcp.host': '127.0.0.1',
+    'mcp.port': 21080,
+    'mcp.path': '/mcp'
+  } as Record<string, unknown>,
+  getConfiguration: vi.fn(() => ({
+    get(key: string, fallbackValue?: unknown) {
+      return key in vscodeMock.configurationValues ? vscodeMock.configurationValues[key] : fallbackValue;
+    }
+  })),
   asExternalUri: vi.fn(async (uri: { toString(): string }) => uri),
   workspaceFolders: [] as Array<{ name: string; uri: { scheme: string; authority: string; toString(): string } }>,
   activeTextEditor: null as { document: { uri: { toString(): string } } } | null,
@@ -44,7 +54,8 @@ vi.mock('vscode', () => ({
     }
   },
   workspace: {
-    workspaceFolders: vscodeMock.workspaceFolders
+    workspaceFolders: vscodeMock.workspaceFolders,
+    getConfiguration: vscodeMock.getConfiguration
   },
   StatusBarAlignment: {
     Left: 1,

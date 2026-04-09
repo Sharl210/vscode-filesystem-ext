@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { createLocalGatewayExecutor } from './executor/localGatewayExecutor';
 import { createAuthState } from './server/auth';
 import { createNodeServerFactory } from './server/createServer';
+import { createMcpRouter } from './server/mcpRouter';
 import { createRouter } from './server/router';
 import { createStaticAssets } from './server/staticAssets';
 import { createDisguiseImageSettingsStore } from './state/disguiseImageSettings';
@@ -21,6 +22,16 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
   const staticAssets = createStaticAssets(context.extensionPath);
   const authState = createAuthState();
   const serviceState = createServiceState(createNodeServerFactory(), authState.token);
+  const mcpConfig = getMcpServiceConfig();
+  const mcpServiceState = createServiceState(createNodeServerFactory(), 'workspace-web-gateway-mcp', {
+    host: mcpConfig.host,
+    port: mcpConfig.port,
+    preferExistingOnPortInUse: true,
+    healthCheckPath: mcpConfig.path,
+    includeTokenInHealthCheck: false,
+    requireJsonOkField: false,
+    includeTokenInLocalUrl: false
+  });
   const disguiseImageSettingsStore = createDisguiseImageSettingsStore(context.globalState);
   const exportJobs = createExportJobsManager({
     fileService,
@@ -65,6 +76,7 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
       return staticAssets.getStaticAsset(pathname);
     }
   });
+  const mcpRouter = createMcpRouter({ executor });
 
   const ensureServiceStarted = async () => {
     const snapshot = await serviceState.ensureStarted((request) => router.handle(request));
@@ -73,6 +85,12 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
       ...snapshot,
       externalUri: await vscode.env.asExternalUri(vscode.Uri.parse(snapshot.localUrl))
     };
+  };
+
+  const ensureMcpServiceStarted = async () => {
+    const snapshot = await mcpServiceState.ensureStarted((request) => mcpRouter.handle(request));
+    const baseUrl = new URL(snapshot.localUrl);
+    return `${baseUrl.origin}${mcpConfig.path}`;
   };
 
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -92,25 +110,6 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     statusBarItem.command = 'workspaceWebGateway.stopService';
     statusBarItem.text = `$(broadcast) 工作区网关：${url.port} 停止`;
     statusBarItem.tooltip = `${connectionInfo.label}\n服务运行中，端口 ${url.port}。点击停止服务。`;
-  }
-
-  function getMcpServerConfig() {
-    const configuration = vscode.workspace.getConfiguration('workspaceWebGateway');
-    const command = normalizeConfigString(configuration.get<string>('mcpServer.command', ''));
-    const args = normalizeConfigStringArray(configuration.get<unknown>('mcpServer.args', []));
-    const cwd = normalizeConfigString(configuration.get<string>('mcpServer.cwd', '')) || undefined;
-    const terminalName =
-      normalizeConfigString(configuration.get<string>('mcpServer.terminalName', 'Workspace Web Gateway MCP')) ||
-      'Workspace Web Gateway MCP';
-    const env = normalizeConfigEnv(configuration.get<Record<string, unknown>>('mcpServer.env', {}));
-
-    return {
-      command,
-      args,
-      cwd,
-      terminalName,
-      env
-    };
   }
 
   return [
@@ -133,38 +132,30 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
       vscode.window.showInformationMessage('访问地址已复制到剪贴板。');
     }),
     vscode.commands.registerCommand('workspaceWebGateway.startMcpServer', async () => {
-      const config = getMcpServerConfig();
-      if (!config.command) {
-        vscode.window.showErrorMessage('请先配置 workspaceWebGateway.mcpServer.command 后再启动 MCP 终端。');
-        return;
-      }
-
-      const { token, localUrl, externalUri } = await ensureServiceStarted();
-      const localGatewayUrl = new URL(localUrl);
-      const terminal = vscode.window.createTerminal({
-        name: config.terminalName,
-        shellPath: config.command,
-        shellArgs: config.args,
-        cwd: config.cwd,
-        env: {
-          ...config.env,
-          WORKSPACE_WEB_GATEWAY_TOKEN: token,
-          WORKSPACE_WEB_GATEWAY_LOCAL_URL: localUrl,
-          WORKSPACE_WEB_GATEWAY_URL: externalUri.toString(),
-          WORKSPACE_WEB_GATEWAY_PORT: localGatewayUrl.port
-        }
-      });
-
-      terminal.show();
-      vscode.window.showInformationMessage(`已通过 VS Code 终端启动 MCP 进程：${config.command}`);
+      const endpoint = await ensureMcpServiceStarted();
+      await vscode.env.clipboard.writeText(endpoint);
+      vscode.window.showInformationMessage(`MCP HTTP 入口已就绪并复制：${endpoint}`);
     }),
     statusBarItem,
     {
       dispose() {
         void serviceState.stop();
+        void mcpServiceState.stop();
       }
     }
   ];
+}
+
+function getMcpServiceConfig() {
+  const configuration = vscode.workspace.getConfiguration('workspaceWebGateway');
+  const host = normalizeLoopbackHost(configuration.get<string>('mcp.host', '127.0.0.1'));
+  const port = normalizePort(configuration.get<number>('mcp.port', 21080), 21080);
+  const path = normalizeHttpPath(configuration.get<string>('mcp.path', '/mcp'));
+  return {
+    host,
+    port,
+    path
+  };
 }
 
 function syncWorkspaceRegistry(workspaceRegistry: ReturnType<typeof createWorkspaceRegistry>) {
@@ -297,15 +288,28 @@ function normalizeConfigString(value: string): string {
   return value.trim();
 }
 
-function normalizeConfigStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
+function normalizePort(value: number, fallback: number): number {
+  if (!Number.isInteger(value) || value <= 0 || value > 65535) {
+    return fallback;
   }
 
-  return value.map((item) => (typeof item === 'string' ? item : String(item))).map((item) => item.trim());
+  return value;
 }
 
-function normalizeConfigEnv(value: Record<string, unknown>): Record<string, string> {
-  const envEntries = Object.entries(value).map(([key, entryValue]) => [key, String(entryValue)] as const);
-  return Object.fromEntries(envEntries);
+function normalizeLoopbackHost(value: string): string {
+  const normalized = normalizeConfigString(value).toLowerCase();
+  if (normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1') {
+    return normalized;
+  }
+
+  return '127.0.0.1';
+}
+
+function normalizeHttpPath(value: string): string {
+  const normalized = normalizeConfigString(value);
+  if (!normalized) {
+    return '/mcp';
+  }
+
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }
