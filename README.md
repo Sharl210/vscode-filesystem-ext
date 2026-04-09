@@ -1,6 +1,6 @@
-# vscode-filesystem-ext
+# VSCode 文件系统拓展
 
-`vscode-filesystem-ext` 是一个 VS Code 扩展。它通过 VS Code 自身的文件接口，把当前 VS Code 可访问的文件资源暴露成一个本地 Web 文件管理界面。
+`vscode-filesystem-ext` 是一个 VS Code 文件系统拓展。它通过 VS Code 自身的文件接口，为当前 VS Code 可访问的文件资源提供 Web 管理界面和 MCP 能力。
 
 网页端不会直接碰操作系统文件系统，所有底层读写、删除、重命名、复制、上传、下载和导出都通过 VS Code 代理执行。
 
@@ -18,7 +18,7 @@
 
 ## 安装说明
 
-1. 下载 Release 中的 `vscode-filesystem-ext-0.0.5.vsix`
+1. 下载 Release 中的 `vscode-filesystem-ext-0.0.6.vsix`
 2. 打开 VS Code
 3. 进入扩展面板
 4. 右上角菜单选择“从 VSIX 安装”
@@ -27,13 +27,13 @@
 也可以命令行安装：
 
 ```bash
-code --install-extension vscode-filesystem-ext-0.0.5.vsix
+code --install-extension vscode-filesystem-ext-0.0.6.vsix
 ```
 
 ## 使用说明
 
 1. 安装扩展后打开任意本机目录、工作区或远程目录
-2. 点击状态栏中的“工作区网关：启动”或直接使用扩展提供的网页入口
+2. 点击状态栏中的“工作区网关：启动”或直接使用拓展提供的网页入口
 3. 浏览器会打开本地 Web 文件管理界面
 4. 在网页中进行浏览、编辑、上传、下载和导出操作
 
@@ -110,7 +110,7 @@ url = "http://127.0.0.1:21080/mcp"
 
 ### MCP 能力说明
 
-这个 MCP 不是“单独的文件型 MCP”或“单独的终端型 MCP”，而是**同一个 MCP 服务**同时提供：
+这个 MCP 不是“单独的文件型 MCP”或“单独的终端型 MCP”，而是 **VSCode 文件系统拓展** 提供的同一个 MCP 服务，同时具备：
 
 - 尽可能完整的文件工具能力
 - 一个终端执行兜底工具 `terminal_execute`
