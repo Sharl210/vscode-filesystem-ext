@@ -39,6 +39,7 @@ vi.mock('vscode', () => ({
   env: {
     openExternal: vscodeMock.openExternal,
     asExternalUri: vscodeMock.asExternalUri,
+    shell: '/bin/sh',
     clipboard: {
       writeText: vscodeMock.copyText
     },
@@ -63,7 +64,9 @@ vi.mock('vscode', () => ({
   },
   Uri: {
     parse(value: string) {
+      const parsed = value.startsWith('file://') ? new URL(value) : null;
       return {
+        fsPath: parsed ? parsed.pathname : value,
         toString() {
           return value;
         }

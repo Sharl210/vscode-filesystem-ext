@@ -1,6 +1,7 @@
 import os from 'node:os';
 import * as vscode from 'vscode';
 import { createLocalGatewayExecutor } from './executor/localGatewayExecutor';
+import { createTerminalExecutor } from './executor/terminalExecutor';
 import { createAuthState } from './server/auth';
 import { createNodeServerFactory } from './server/createServer';
 import { createMcpRouter } from './server/mcpRouter';
@@ -57,7 +58,10 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
       resolveWorkspacePath
     },
     fileService,
-    exportJobs
+    exportJobs,
+    terminal: createTerminalExecutor({
+      shellPath: vscode.env.shell || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')
+    })
   });
 
   const router = createRouter({

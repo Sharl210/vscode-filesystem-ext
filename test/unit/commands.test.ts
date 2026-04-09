@@ -117,7 +117,8 @@ const mocked = vi.hoisted(() => {
       resolveWorkspacePath: vi.fn((_workspaceUri: string, relativePath: string) => `executor://resolved/${relativePath}`)
     },
     files: { kind: 'executor-files' },
-    exports: { kind: 'executor-exports' }
+    exports: { kind: 'executor-exports' },
+    terminal: { kind: 'executor-terminal' }
   };
   const router = {
     handle: vi.fn(async () => ({
@@ -190,6 +191,7 @@ vi.mock('vscode', () => ({
   env: {
     asExternalUri: vi.fn(async (uri: { toString(): string }) => uri),
     openExternal: vi.fn(),
+    shell: '/bin/sh',
     clipboard: {
       writeText: mocked.clipboardWriteText
     }
@@ -229,6 +231,10 @@ vi.mock('vscode', () => ({
 
 vi.mock('../../src/executor/localGatewayExecutor', () => ({
   createLocalGatewayExecutor: mocked.createLocalGatewayExecutor
+}));
+
+vi.mock('../../src/executor/terminalExecutor', () => ({
+  createTerminalExecutor: vi.fn(() => ({ execute: vi.fn() }))
 }));
 
 vi.mock('../../src/server/auth', () => ({
