@@ -1,10 +1,10 @@
 import http from 'node:http';
-import type { RequestShape, RunningServer } from '../state/serviceState';
+import type { RequestShape, RunningServer, ServerStartOptions } from '../state/serviceState';
 import type { RouterResponse } from './response';
 
 export function createNodeServerFactory() {
   return {
-    async start(handler: (request: RequestShape) => Promise<RouterResponse>): Promise<RunningServer> {
+    async start(handler: (request: RequestShape) => Promise<RouterResponse>, options: ServerStartOptions = {}): Promise<RunningServer> {
       const server = http.createServer(async (request, response) => {
         try {
           const body = await readBody(request);
@@ -33,7 +33,7 @@ export function createNodeServerFactory() {
 
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
-        server.listen(0, '127.0.0.1', () => resolve());
+        server.listen(options.port ?? 0, options.host ?? '127.0.0.1', () => resolve());
       });
 
       const address = server.address();

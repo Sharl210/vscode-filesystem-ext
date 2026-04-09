@@ -141,4 +141,45 @@ describe('service state', () => {
 
     expect(restarted.localUrl).toBe('http://127.0.0.1:5021/?token=shared-token');
   });
+
+  it('reuses an existing service on a fixed port when the address is already in use', async () => {
+    const fetchMock = vi.fn(async (_input: URL | RequestInfo) => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const serviceState = createServiceState(
+      {
+        async start() {
+          const error = new Error('address in use') as Error & { code: string };
+          error.code = 'EADDRINUSE';
+          throw error;
+        }
+      },
+      'shared-token',
+      {
+        host: '127.0.0.1',
+        port: 21080,
+        preferExistingOnPortInUse: true,
+        healthCheckPath: '/mcp',
+        includeTokenInHealthCheck: false,
+        requireJsonOkField: false
+      }
+    );
+
+    const started = await serviceState.ensureStarted(async () => ({
+      status: 200,
+      headers: {},
+      body: new Uint8Array()
+    }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error('fetch call was not captured');
+    }
+
+    const fetchUrl = firstCall[0] as URL;
+    expect(fetchUrl.toString()).toBe('http://127.0.0.1:21080/mcp');
+    expect(started.localUrl).toBe('http://127.0.0.1:21080/?token=shared-token');
+    vi.unstubAllGlobals();
+  });
 });
