@@ -105,6 +105,11 @@ describe('local gateway executor', () => {
         cancelJob() {
           throw new Error('not used');
         }
+      },
+      terminal: {
+        async execute() {
+          throw new Error('not used');
+        }
       }
     });
 
@@ -214,6 +219,20 @@ describe('local gateway executor', () => {
         cancelJob() {
           throw new Error('not used');
         }
+      },
+      terminal: {
+        async execute(...args) {
+          calls.push({ method: 'execute', args });
+          return {
+            command: 'pwd',
+            cwd: '/workspace/demo',
+            stdout: '/workspace/demo\n',
+            stderr: '',
+            combinedOutput: '/workspace/demo\n',
+            exitCode: 0,
+            timedOut: false
+          };
+        }
       }
     });
 
@@ -236,6 +255,10 @@ describe('local gateway executor', () => {
     await expect(executor.files.renameEntry('file:///workspace/demo/a', 'file:///workspace/demo/b')).resolves.toBeUndefined();
     await expect(executor.files.copyEntry('file:///workspace/demo/a', 'file:///workspace/demo/c')).resolves.toBeUndefined();
     await expect(executor.files.moveEntry('file:///workspace/demo/c', 'file:///workspace/demo/d')).resolves.toBeUndefined();
+    await expect(executor.terminal.execute({ command: 'pwd', cwd: '/workspace/demo' })).resolves.toMatchObject({
+      command: 'pwd',
+      exitCode: 0
+    });
 
     expect(calls).toEqual([
       { method: 'listDirectory', args: ['file:///workspace/demo', 'demo'] },
@@ -254,7 +277,8 @@ describe('local gateway executor', () => {
       { method: 'createDirectory', args: ['file:///workspace/demo/new-folder'] },
       { method: 'renameEntry', args: ['file:///workspace/demo/a', 'file:///workspace/demo/b'] },
       { method: 'copyEntry', args: ['file:///workspace/demo/a', 'file:///workspace/demo/c'] },
-      { method: 'renameEntry', args: ['file:///workspace/demo/c', 'file:///workspace/demo/d'] }
+      { method: 'renameEntry', args: ['file:///workspace/demo/c', 'file:///workspace/demo/d'] },
+      { method: 'execute', args: [{ command: 'pwd', cwd: '/workspace/demo' }] }
     ]);
   });
 
@@ -331,6 +355,11 @@ describe('local gateway executor', () => {
         cancelJob(...args) {
           calls.push({ method: 'cancelJob', args });
           return true;
+        }
+      },
+      terminal: {
+        async execute() {
+          throw new Error('not used');
         }
       }
     });

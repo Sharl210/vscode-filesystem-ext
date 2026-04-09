@@ -59,6 +59,25 @@ export interface GatewayFileExportExecutor {
 
 export interface GatewayFileExecutor extends GatewayFileReadExecutor, GatewayFileMutationExecutor, GatewayFileExportExecutor {}
 
+export interface GatewayTerminalExecutionResult {
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  combinedOutput: string;
+  exitCode: number | null;
+  timedOut: boolean;
+}
+
+export interface GatewayTerminalExecutor {
+  execute(input: {
+    command: string;
+    cwd: string;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+  }): Promise<GatewayTerminalExecutionResult>;
+}
+
 export interface GatewayExportJobController {
   startJob(input: { workspaceUri: string; paths: string[]; format: 'archive' | 'disguised-image' }): ExportJobSnapshotDto;
   getJob(jobId: string): ExportJobSnapshotDto | null;
@@ -71,4 +90,5 @@ export interface GatewayExecutor {
   readonly reads: GatewayReadContextExecutor;
   readonly files: GatewayFileExecutor;
   readonly exports: GatewayExportJobController;
+  readonly terminal: GatewayTerminalExecutor;
 }

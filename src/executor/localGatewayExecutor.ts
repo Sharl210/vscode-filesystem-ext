@@ -2,7 +2,8 @@ import type {
   GatewayExecutor,
   GatewayExportJobController,
   GatewayFileExecutor,
-  GatewayReadContextExecutor
+  GatewayReadContextExecutor,
+  GatewayTerminalExecutor
 } from './contracts';
 
 interface LocalGatewayFileServiceAdapter {
@@ -26,16 +27,22 @@ interface LocalGatewayExportJobsAdapter {
   cancelJob: GatewayExportJobController['cancelJob'];
 }
 
+interface LocalGatewayTerminalAdapter {
+  execute: GatewayTerminalExecutor['execute'];
+}
+
 interface LocalGatewayExecutorDependencies {
   reads: GatewayReadContextExecutor;
   fileService: LocalGatewayFileServiceAdapter;
   exportJobs: LocalGatewayExportJobsAdapter;
+  terminal: LocalGatewayTerminalAdapter;
 }
 
 class LocalGatewayExecutor implements GatewayExecutor {
   readonly reads: GatewayReadContextExecutor;
   readonly files: GatewayFileExecutor;
   readonly exports: GatewayExportJobController;
+  readonly terminal: GatewayTerminalExecutor;
 
   constructor(dependencies: LocalGatewayExecutorDependencies) {
     this.reads = {
@@ -122,6 +129,11 @@ class LocalGatewayExecutor implements GatewayExecutor {
       },
       cancelJob(jobId) {
         return dependencies.exportJobs.cancelJob(jobId);
+      }
+    };
+    this.terminal = {
+      execute(input) {
+        return dependencies.terminal.execute(input);
       }
     };
   }
