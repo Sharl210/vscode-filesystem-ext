@@ -76,6 +76,28 @@ const mocked = vi.hoisted(() => {
     show: vi.fn(),
     dispose: vi.fn()
   };
+  const terminal = {
+    show: vi.fn(),
+    dispose: vi.fn()
+  };
+  const extensionConfigurationValues: Record<string, unknown> = {
+    'mcpServer.command': 'node',
+    'mcpServer.args': ['./dist/mcp-server.js'],
+    'mcpServer.cwd': '/tmp/mcp',
+    'mcpServer.env': {
+      MCP_TRANSPORT: 'stdio'
+    },
+    'mcpServer.terminalName': 'Workspace Web Gateway MCP'
+  };
+  const commandHandlers = new Map<string, (...args: unknown[]) => unknown>();
+  const serviceState = {
+    ensureStarted: vi.fn(async () => ({
+      token: 'shared-token',
+      localUrl: 'http://127.0.0.1:3344/?token=shared-token'
+    })),
+    stop: vi.fn(),
+    getSnapshot: vi.fn(() => ({ token: null, localUrl: null }))
+  };
   const disguiseImageSettingsStore = {
     getSettings: vi.fn(async () => disguiseImageSettings),
     saveSettings: vi.fn(async () => {})
@@ -115,34 +137,43 @@ const mocked = vi.hoisted(() => {
       void dependencies;
       return router;
     }),
-    createServiceState: vi.fn(() => ({
-      ensureStarted: vi.fn(),
-      stop: vi.fn(),
-      getSnapshot: vi.fn(() => ({ token: null, localUrl: null }))
-    })),
+    createServiceState: vi.fn(() => serviceState),
     createStaticAssets: vi.fn(() => staticAssets),
     createStatusBarItem: vi.fn(() => statusBarItem),
+    createTerminal: vi.fn(() => terminal),
     createWorkspaceRegistry: vi.fn(() => ({
       sync: vi.fn(() => [localWorkspace])
     })),
+    commandHandlers,
     disguiseImageSettings,
     disguiseImageSettingsStore,
+    extensionConfigurationValues,
     executor,
     executorConnectionInfo,
     executorInitialLocation,
     executorWorkspace,
     exportJobs,
     fileService,
-    localConnectionInfo,
-    registerCommand: vi.fn((_command: string, _handler: (...args: unknown[]) => unknown) => ({
-      dispose: vi.fn()
+    getConfiguration: vi.fn(() => ({
+      get: vi.fn((key: string, fallbackValue?: unknown) =>
+        key in extensionConfigurationValues ? extensionConfigurationValues[key] : fallbackValue
+      )
     })),
+    localConnectionInfo,
+    registerCommand: vi.fn((command: string, handler: (...args: unknown[]) => unknown) => {
+      commandHandlers.set(command, handler);
+      return {
+        dispose: vi.fn()
+      };
+    }),
     resolveConnectionInfo: vi.fn(() => localConnectionInfo),
     resolveWorkspacePath: vi.fn(() => 'resolved-directly'),
     router,
     staticAsset,
     staticAssets,
     statusBarItem,
+    terminal,
+    serviceState,
     syncAccessibleRoots: vi.fn(() => [localWorkspace])
   };
 });
@@ -160,11 +191,13 @@ vi.mock('vscode', () => ({
   },
   window: {
     activeTextEditor: null,
+    createTerminal: mocked.createTerminal,
     createStatusBarItem: mocked.createStatusBarItem,
     showInformationMessage: vi.fn()
   },
   workspace: {
     workspaceFolders: [],
+    getConfiguration: mocked.getConfiguration,
     fs: {
       readDirectory: vi.fn(),
       readFile: vi.fn(),
@@ -245,6 +278,7 @@ vi.mock('../../src/workspace/workspaceRegistry', () => ({
 describe('gateway command composition', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocked.commandHandlers.clear();
     mocked.statusBarItem.text = '';
     mocked.statusBarItem.tooltip = '';
     mocked.statusBarItem.command = '';
@@ -304,5 +338,41 @@ describe('gateway command composition', () => {
     });
     expect(mocked.staticAssets.getIndexHtml).toHaveBeenCalledTimes(1);
     expect(mocked.staticAssets.getStaticAsset).toHaveBeenCalledWith('/app.js');
+  });
+
+  it('starts MCP server via VS Code terminal and injects gateway env variables', async () => {
+    const { registerGatewayCommands } = await import('../../src/commands.js');
+
+    registerGatewayCommands({
+      extensionPath: '/tmp/workspace-web-gateway',
+      globalState: {}
+    } as never);
+
+    const command = mocked.commandHandlers.get('workspaceWebGateway.startMcpServer');
+    expect(command).toBeTypeOf('function');
+
+    if (!command) {
+      throw new Error('workspaceWebGateway.startMcpServer command was not captured');
+    }
+
+    await command();
+
+    expect(mocked.createTerminal).toHaveBeenCalledTimes(1);
+    expect(mocked.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Workspace Web Gateway MCP',
+        shellPath: 'node',
+        shellArgs: ['./dist/mcp-server.js'],
+        cwd: '/tmp/mcp',
+        env: expect.objectContaining({
+          MCP_TRANSPORT: 'stdio',
+          WORKSPACE_WEB_GATEWAY_TOKEN: 'shared-token',
+          WORKSPACE_WEB_GATEWAY_LOCAL_URL: 'http://127.0.0.1:3344/?token=shared-token',
+          WORKSPACE_WEB_GATEWAY_URL: 'http://127.0.0.1:3344/?token=shared-token',
+          WORKSPACE_WEB_GATEWAY_PORT: '3344'
+        })
+      })
+    );
+    expect(mocked.terminal.show).toHaveBeenCalledTimes(1);
   });
 });

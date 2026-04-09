@@ -94,6 +94,25 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     statusBarItem.tooltip = `${connectionInfo.label}\n服务运行中，端口 ${url.port}。点击停止服务。`;
   }
 
+  function getMcpServerConfig() {
+    const configuration = vscode.workspace.getConfiguration('workspaceWebGateway');
+    const command = normalizeConfigString(configuration.get<string>('mcpServer.command', ''));
+    const args = normalizeConfigStringArray(configuration.get<unknown>('mcpServer.args', []));
+    const cwd = normalizeConfigString(configuration.get<string>('mcpServer.cwd', '')) || undefined;
+    const terminalName =
+      normalizeConfigString(configuration.get<string>('mcpServer.terminalName', 'Workspace Web Gateway MCP')) ||
+      'Workspace Web Gateway MCP';
+    const env = normalizeConfigEnv(configuration.get<Record<string, unknown>>('mcpServer.env', {}));
+
+    return {
+      command,
+      args,
+      cwd,
+      terminalName,
+      env
+    };
+  }
+
   return [
     vscode.commands.registerCommand('workspaceWebGateway.startService', async () => {
       const { externalUri } = await ensureServiceStarted();
@@ -112,6 +131,32 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
       const { externalUri } = await ensureServiceStarted();
       await vscode.env.clipboard.writeText(externalUri.toString());
       vscode.window.showInformationMessage('访问地址已复制到剪贴板。');
+    }),
+    vscode.commands.registerCommand('workspaceWebGateway.startMcpServer', async () => {
+      const config = getMcpServerConfig();
+      if (!config.command) {
+        vscode.window.showErrorMessage('请先配置 workspaceWebGateway.mcpServer.command 后再启动 MCP 终端。');
+        return;
+      }
+
+      const { token, localUrl, externalUri } = await ensureServiceStarted();
+      const localGatewayUrl = new URL(localUrl);
+      const terminal = vscode.window.createTerminal({
+        name: config.terminalName,
+        shellPath: config.command,
+        shellArgs: config.args,
+        cwd: config.cwd,
+        env: {
+          ...config.env,
+          WORKSPACE_WEB_GATEWAY_TOKEN: token,
+          WORKSPACE_WEB_GATEWAY_LOCAL_URL: localUrl,
+          WORKSPACE_WEB_GATEWAY_URL: externalUri.toString(),
+          WORKSPACE_WEB_GATEWAY_PORT: localGatewayUrl.port
+        }
+      });
+
+      terminal.show();
+      vscode.window.showInformationMessage(`已通过 VS Code 终端启动 MCP 进程：${config.command}`);
     }),
     statusBarItem,
     {
@@ -246,4 +291,21 @@ function createVsCodeFileSystemAdapter() {
       await vscode.workspace.fs.copy(vscode.Uri.parse(fromUri), vscode.Uri.parse(toUri), { overwrite: false });
     }
   };
+}
+
+function normalizeConfigString(value: string): string {
+  return value.trim();
+}
+
+function normalizeConfigStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => (typeof item === 'string' ? item : String(item))).map((item) => item.trim());
+}
+
+function normalizeConfigEnv(value: Record<string, unknown>): Record<string, string> {
+  const envEntries = Object.entries(value).map(([key, entryValue]) => [key, String(entryValue)] as const);
+  return Object.fromEntries(envEntries);
 }

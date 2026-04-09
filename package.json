@@ -2,7 +2,7 @@
   "name": "vscode-filesystem-ext",
   "displayName": "vscode-filesystem-ext",
   "description": "通过本地网页网关暴露当前 VS Code 已打开的工作区文件。",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "local",
   "private": true,
   "license": "PolyForm Noncommercial 1.0.0",
@@ -21,14 +21,15 @@
     "Other"
   ],
   "extensionKind": [
-    "ui"
+    "workspace"
   ],
   "activationEvents": [
     "onStartupFinished",
     "onCommand:workspaceWebGateway.startService",
     "onCommand:workspaceWebGateway.stopService",
     "onCommand:workspaceWebGateway.openWebUi",
-    "onCommand:workspaceWebGateway.copyAccessUrl"
+    "onCommand:workspaceWebGateway.copyAccessUrl",
+    "onCommand:workspaceWebGateway.startMcpServer"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -48,8 +49,48 @@
       {
         "command": "workspaceWebGateway.copyAccessUrl",
         "title": "工作区网页网关：复制访问地址"
+      },
+      {
+        "command": "workspaceWebGateway.startMcpServer",
+        "title": "工作区网页网关：通过终端启动 MCP 服务"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Workspace Web Gateway",
+      "properties": {
+        "workspaceWebGateway.mcpServer.command": {
+          "type": "string",
+          "default": "",
+          "description": "用于启动 MCP 服务的命令。该命令将通过 VS Code 终端执行。"
+        },
+        "workspaceWebGateway.mcpServer.args": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "启动 MCP 服务命令的参数列表。"
+        },
+        "workspaceWebGateway.mcpServer.cwd": {
+          "type": "string",
+          "default": "",
+          "description": "启动 MCP 服务时终端的工作目录，留空表示使用 VS Code 默认终端目录。"
+        },
+        "workspaceWebGateway.mcpServer.env": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "注入到 MCP 终端进程的额外环境变量。"
+        },
+        "workspaceWebGateway.mcpServer.terminalName": {
+          "type": "string",
+          "default": "Workspace Web Gateway MCP",
+          "description": "启动 MCP 服务时创建的 VS Code 终端名称。"
+        }
+      }
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",

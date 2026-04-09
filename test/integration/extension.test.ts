@@ -124,11 +124,11 @@ describe('extension entry', () => {
 
     await extension.activate(context as never);
 
-    expect(vscodeMock.registerCommand).toHaveBeenCalledTimes(4);
+    expect(vscodeMock.registerCommand).toHaveBeenCalledTimes(5);
     expect(vscodeMock.createStatusBarItem).toHaveBeenCalledTimes(1);
     expect(vscodeMock.statusBarItem.text).toBe('$(globe) 工作区网关：启动');
     expect(vscodeMock.statusBarItem.command).toBe('workspaceWebGateway.openWebUi');
-    expect(context.subscriptions).toHaveLength(6);
+    expect(context.subscriptions).toHaveLength(7);
   });
 
   it('updates the status bar button to stop mode after opening the web ui', async () => {
@@ -284,5 +284,69 @@ describe('extension entry', () => {
       expandedPaths: ['', 'components']
     });
     expect(payload.data.initialLocation.rootId).not.toBe(parentWorkspace?.id);
+  });
+
+  it('returns remote connection info and forwarded roots when running in an ssh workspace host', async () => {
+    const context = createExtensionContext();
+    vscodeMock.remoteName = 'ssh-remote';
+    vscodeMock.workspaceFolders.push(
+      { name: 'remote-app', uri: createMockUri('vscode-remote://ssh-remote+prod/home/user/remote-app') }
+    );
+
+    await extension.activate(context as never);
+
+    const openCommandCall = vscodeMock.registerCommand.mock.calls.find(
+      ([command]) => command === 'workspaceWebGateway.openWebUi'
+    );
+    expect(openCommandCall).toBeDefined();
+
+    const openCommand = openCommandCall?.[1] as () => Promise<void>;
+    await openCommand();
+
+    expect(vscodeMock.asExternalUri).toHaveBeenCalledTimes(1);
+    const internalUri = vscodeMock.asExternalUri.mock.calls[0]?.[0] as { toString(): string };
+    const baseUrl = new URL(internalUri.toString());
+    const token = baseUrl.searchParams.get('token');
+    const response = await fetch(`${baseUrl.origin}/api/workspaces?token=${token}`);
+    const payload = await response.json() as {
+      ok: boolean;
+      data: {
+        connection: {
+          kind: 'local' | 'remote';
+          label: string;
+          host: string;
+          remoteName: string | null;
+          authority: string | null;
+        };
+        items: Array<{ id: string; uri: string; source: 'local' | 'workspace' | 'remote' }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.data.connection.kind).toBe('remote');
+    expect(payload.data.connection.remoteName).toBe('ssh-remote');
+    expect(payload.data.connection.authority).toBe('ssh-remote+prod');
+    expect(payload.data.connection.label).toContain('远程 · ssh-remote · prod');
+    expect(payload.data.items).toEqual(expect.arrayContaining([
+      {
+        id: expect.any(String),
+        name: '远程主机根目录 (prod)',
+        uri: 'file:///',
+        source: 'remote'
+      },
+      {
+        id: expect.any(String),
+        name: '远程主机主目录 (prod)',
+        uri: expect.stringContaining('file:///'),
+        source: 'remote'
+      },
+      {
+        id: expect.any(String),
+        name: '工作区 · remote-app',
+        uri: 'vscode-remote://ssh-remote+prod/home/user/remote-app',
+        source: 'workspace'
+      }
+    ]));
   });
 });
