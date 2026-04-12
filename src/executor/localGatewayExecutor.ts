@@ -2,8 +2,8 @@ import type {
   GatewayExecutor,
   GatewayExportJobController,
   GatewayFileExecutor,
+  GatewayTerminalManager,
   GatewayReadContextExecutor,
-  GatewayTerminalExecutor
 } from './contracts';
 
 interface LocalGatewayFileServiceAdapter {
@@ -28,7 +28,15 @@ interface LocalGatewayExportJobsAdapter {
 }
 
 interface LocalGatewayTerminalAdapter {
-  execute: GatewayTerminalExecutor['execute'];
+  listTabs: GatewayTerminalManager['listTabs'];
+  getTabContent: GatewayTerminalManager['getTabContent'];
+  newTab: GatewayTerminalManager['newTab'];
+  closeTab: GatewayTerminalManager['closeTab'];
+  execute: GatewayTerminalManager['execute'];
+  startExecution: GatewayTerminalManager['startExecution'];
+  getExecution: GatewayTerminalManager['getExecution'];
+  getExecutionOutput: GatewayTerminalManager['getExecutionOutput'];
+  cancelExecution: GatewayTerminalManager['cancelExecution'];
 }
 
 interface LocalGatewayExecutorDependencies {
@@ -42,7 +50,7 @@ class LocalGatewayExecutor implements GatewayExecutor {
   readonly reads: GatewayReadContextExecutor;
   readonly files: GatewayFileExecutor;
   readonly exports: GatewayExportJobController;
-  readonly terminal: GatewayTerminalExecutor;
+  readonly terminal: GatewayTerminalManager;
 
   constructor(dependencies: LocalGatewayExecutorDependencies) {
     this.reads = {
@@ -132,8 +140,32 @@ class LocalGatewayExecutor implements GatewayExecutor {
       }
     };
     this.terminal = {
+      listTabs() {
+        return dependencies.terminal.listTabs();
+      },
+      getTabContent(tabId) {
+        return dependencies.terminal.getTabContent(tabId);
+      },
+      newTab(input) {
+        return dependencies.terminal.newTab(input);
+      },
+      closeTab(tabId, input) {
+        return dependencies.terminal.closeTab(tabId, input);
+      },
       execute(input) {
         return dependencies.terminal.execute(input);
+      },
+      startExecution(input) {
+        return dependencies.terminal.startExecution(input);
+      },
+      getExecution(executionId) {
+        return dependencies.terminal.getExecution(executionId);
+      },
+      getExecutionOutput(executionId) {
+        return dependencies.terminal.getExecutionOutput(executionId);
+      },
+      cancelExecution(executionId) {
+        return dependencies.terminal.cancelExecution(executionId);
       }
     };
   }

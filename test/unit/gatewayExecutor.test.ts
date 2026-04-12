@@ -106,11 +106,7 @@ describe('local gateway executor', () => {
           throw new Error('not used');
         }
       },
-      terminal: {
-        async execute() {
-          throw new Error('not used');
-        }
-      }
+      terminal: createUnusedTerminalStub()
     });
 
     expect(executor.reads.getWorkspaces()).toBe(workspaces);
@@ -128,7 +124,7 @@ describe('local gateway executor', () => {
     ]);
   });
 
-  it('adapts local file operations behind the executor contract', async () => {
+  it('adapts local file and terminal operations behind the executor contract', async () => {
     const { createLocalGatewayExecutor } = await loadLocalGatewayExecutorModule();
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const directoryEntry: FileEntryDto = {
@@ -221,9 +217,22 @@ describe('local gateway executor', () => {
         }
       },
       terminal: {
+        listTabs() {
+          return { tabs: [], defaultTabId: null };
+        },
+        getTabContent() {
+          throw new Error('not used');
+        },
+        async newTab() {
+          throw new Error('not used');
+        },
+        async closeTab() {
+          throw new Error('not used');
+        },
         async execute(...args) {
           calls.push({ method: 'execute', args });
           return {
+            tabId: 'tab-1',
             command: 'pwd',
             cwd: '/workspace/demo',
             stdout: '/workspace/demo\n',
@@ -232,6 +241,34 @@ describe('local gateway executor', () => {
             exitCode: 0,
             timedOut: false
           };
+        },
+        async startExecution(...args) {
+          calls.push({ method: 'startExecution', args });
+          return {
+            executionId: 'exec-1',
+            tabId: 'tab-1',
+            command: 'pwd',
+            cwd: '/workspace/demo',
+            status: 'queued' as const,
+            createdAt: '2026-04-10T10:00:00.000Z',
+            startedAt: null,
+            finishedAt: null,
+            exitCode: null,
+            timedOut: false,
+            error: null
+          };
+        },
+        getExecution(...args) {
+          calls.push({ method: 'getExecution', args });
+          return null;
+        },
+        getExecutionOutput(...args) {
+          calls.push({ method: 'getExecutionOutput', args });
+          return null;
+        },
+        cancelExecution(...args) {
+          calls.push({ method: 'cancelExecution', args });
+          return false;
         }
       }
     });
@@ -259,6 +296,13 @@ describe('local gateway executor', () => {
       command: 'pwd',
       exitCode: 0
     });
+    await expect(executor.terminal.startExecution({ command: 'pwd', cwd: '/workspace/demo' })).resolves.toMatchObject({
+      executionId: 'exec-1',
+      status: 'queued'
+    });
+    expect(executor.terminal.getExecution('exec-1')).toBeNull();
+    expect(executor.terminal.getExecutionOutput('exec-1')).toBeNull();
+    expect(executor.terminal.cancelExecution('exec-1')).toBe(false);
 
     expect(calls).toEqual([
       { method: 'listDirectory', args: ['file:///workspace/demo', 'demo'] },
@@ -278,7 +322,11 @@ describe('local gateway executor', () => {
       { method: 'renameEntry', args: ['file:///workspace/demo/a', 'file:///workspace/demo/b'] },
       { method: 'copyEntry', args: ['file:///workspace/demo/a', 'file:///workspace/demo/c'] },
       { method: 'renameEntry', args: ['file:///workspace/demo/c', 'file:///workspace/demo/d'] },
-      { method: 'execute', args: [{ command: 'pwd', cwd: '/workspace/demo' }] }
+      { method: 'execute', args: [{ command: 'pwd', cwd: '/workspace/demo' }] },
+      { method: 'startExecution', args: [{ command: 'pwd', cwd: '/workspace/demo' }] },
+      { method: 'getExecution', args: ['exec-1'] },
+      { method: 'getExecutionOutput', args: ['exec-1'] },
+      { method: 'cancelExecution', args: ['exec-1'] }
     ]);
   });
 
@@ -357,26 +405,17 @@ describe('local gateway executor', () => {
           return true;
         }
       },
-      terminal: {
-        async execute() {
-          throw new Error('not used');
-        }
-      }
+      terminal: createUnusedTerminalStub()
     });
 
-    expect(
-      executor.exports.startJob({ workspaceUri: 'file:///workspace/demo', paths: ['hello.ts'], format: 'archive' })
-    ).toBe(snapshot);
+    expect(executor.exports.startJob({ workspaceUri: 'file:///workspace/demo', paths: ['hello.ts'], format: 'archive' })).toBe(snapshot);
     expect(executor.exports.getJob('job-1')).toBe(snapshot);
     expect(executor.exports.getDownload('job-1')).toBe(download);
     expect(executor.exports.consumeDownload('job-1')).toBe(download);
     expect(executor.exports.cancelJob('job-1')).toBe(true);
 
     expect(calls).toEqual([
-      {
-        method: 'startJob',
-        args: [{ workspaceUri: 'file:///workspace/demo', paths: ['hello.ts'], format: 'archive' }]
-      },
+      { method: 'startJob', args: [{ workspaceUri: 'file:///workspace/demo', paths: ['hello.ts'], format: 'archive' }] },
       { method: 'getJob', args: ['job-1'] },
       { method: 'getDownload', args: ['job-1'] },
       { method: 'getDownload', args: ['job-1'] },
@@ -420,6 +459,38 @@ function createUnusedReadsStub() {
       throw new Error('not used');
     },
     resolveWorkspacePath() {
+      throw new Error('not used');
+    }
+  };
+}
+
+function createUnusedTerminalStub() {
+  return {
+    listTabs() {
+      return { tabs: [], defaultTabId: null };
+    },
+    getTabContent() {
+      throw new Error('not used');
+    },
+    async newTab() {
+      throw new Error('not used');
+    },
+    async closeTab() {
+      throw new Error('not used');
+    },
+    async execute() {
+      throw new Error('not used');
+    },
+    async startExecution() {
+      throw new Error('not used');
+    },
+    getExecution() {
+      throw new Error('not used');
+    },
+    getExecutionOutput() {
+      throw new Error('not used');
+    },
+    cancelExecution() {
       throw new Error('not used');
     }
   };
