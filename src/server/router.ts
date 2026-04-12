@@ -1,10 +1,11 @@
-import type { GatewayExecutor } from '../executor/contracts';
+import type { GatewayExecutor, GatewayTerminalManager } from '../executor/contracts';
 import type {
   CreateExportJobRequestDto,
   DisguiseImageSettingsDto
 } from '../types/api';
 import { normalizeEntryName } from '../utils/nameValidation';
 import type { AuthState } from './auth';
+import { createTerminalRouter } from './terminalRouter';
 import {
   sendBinaryDownload,
   sendHtml,
@@ -25,6 +26,7 @@ export interface RouterRequest {
 interface RouterDependencies {
   auth: AuthState;
   executor: Pick<GatewayExecutor, 'reads' | 'files' | 'exports'>;
+  terminalManager?: GatewayTerminalManager;
   getDisguiseImageSettings(): Promise<DisguiseImageSettingsDto>;
   saveDisguiseImageSettings(settings: {
     selectedSource: 'template' | 'custom';
@@ -36,6 +38,13 @@ interface RouterDependencies {
 }
 
 export function createRouter(dependencies: RouterDependencies) {
+  const terminalRouter = dependencies.terminalManager
+    ? createTerminalRouter({
+        reads: dependencies.executor.reads,
+        terminalManager: dependencies.terminalManager
+      })
+    : null;
+
   return {
     async handle(request: RouterRequest): Promise<RouterResponse> {
       const { reads, files, exports } = dependencies.executor;
@@ -70,6 +79,13 @@ export function createRouter(dependencies: RouterDependencies) {
 
       if (!dependencies.auth.validateRequest(request.headers, url)) {
         return sendJsonError('UNAUTHORIZED', '缺少有效的访问凭据');
+      }
+
+      if (terminalRouter) {
+        const terminalResponse = await terminalRouter.handle(request, url);
+        if (terminalResponse) {
+          return terminalResponse;
+        }
       }
 
       if (url.pathname === '/api/workspaces' && request.method === 'GET') {

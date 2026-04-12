@@ -69,6 +69,61 @@ export interface GetFileResponseDto {
   editable: boolean;
 }
 
+export type TerminalTabStatusDto = 'idle' | 'running';
+
+export interface TerminalTabSnapshotDto {
+  tabId: string;
+  title: string;
+  cwd: string;
+  status: TerminalTabStatusDto;
+  isDefault: boolean;
+  lastActiveAt: string;
+  recentCommands: string[];
+}
+
+export interface TerminalPoolSnapshotDto {
+  tabs: TerminalTabSnapshotDto[];
+  defaultTabId: string | null;
+}
+
+export interface TerminalTabContentDto {
+  tabId: string;
+  title: string;
+  status: TerminalTabStatusDto;
+  content: string;
+  recentCommands: string[];
+  historyVersion: number;
+}
+
+export type TerminalExecutionStatusDto = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface TerminalExecutionSnapshotDto {
+  executionId: string;
+  tabId: string;
+  command: string;
+  cwd: string;
+  status: TerminalExecutionStatusDto;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  timedOut: boolean;
+  error: string | null;
+}
+
+export interface TerminalExecutionOutputDto {
+  executionId: string;
+  tabId: string;
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  combinedOutput: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  finishedAt: string | null;
+}
+
 export interface CreateDirectoryRequestDto {
   workspace: string;
   path: string;
