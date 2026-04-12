@@ -12,13 +12,13 @@ describe('terminal executor', () => {
     const secondChild = createMockChild();
 
     spawnMock
-      .mockImplementationOnce((_command: string, options: { shell?: string }) => {
+      .mockImplementationOnce((_command: string, _options: { shell?: string }) => {
         queueMicrotask(() => {
           firstChild.emitError(Object.assign(new Error('spawn missing shell ENOENT'), { code: 'ENOENT' }));
         });
         return firstChild.child;
       })
-      .mockImplementationOnce((_command: string, options: { shell?: string }) => {
+      .mockImplementationOnce((_command: string, _options: { shell?: string }) => {
         queueMicrotask(() => {
           secondChild.emitStdout('/workspace/demo\\n');
           secondChild.emitClose(0);
@@ -48,6 +48,59 @@ describe('terminal executor', () => {
       exitCode: 0,
       stdout: '/workspace/demo\\n'
     });
+  });
+
+  it('wraps Windows shell commands to force UTF-8 terminal output', async () => {
+    const child = createMockChild();
+
+    spawnMock.mockImplementationOnce((_command: string, _options: { shell?: string }) => {
+      queueMicrotask(() => {
+        child.emitClose(0);
+      });
+      return child.child;
+    });
+
+    const { createTerminalExecutor } = await import('../../src/executor/terminalExecutor.js');
+    const executor = createTerminalExecutor({
+      shellPath: 'powershell.exe'
+    });
+
+    await executor.execute({
+      command: 'Write-Output 你好',
+      cwd: 'C:/workspace/demo'
+    });
+
+    expect(spawnMock).toHaveBeenCalled();
+    expect(spawnMock.mock.calls.at(-1)?.[0]).toContain('Write-Output 你好');
+    expect(spawnMock.mock.calls.at(-1)?.[0]).toContain('$OutputEncoding');
+  });
+
+  it('aborts compatibility execution when the abort signal is triggered', async () => {
+    const child = createMockChild();
+
+    spawnMock.mockImplementationOnce((_command: string, _options: { shell?: string }) => child.child);
+
+    const { createTerminalExecutor } = await import('../../src/executor/terminalExecutor.js');
+    const executor = createTerminalExecutor({
+      shellPath: '/bin/sh'
+    });
+    const controller = new AbortController();
+
+    const running = executor.execute({
+      command: 'sleep 10',
+      cwd: '/workspace/demo',
+      signal: controller.signal
+    });
+    controller.abort();
+    queueMicrotask(() => {
+      child.emitClose(null);
+    });
+
+    await expect(running).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'TERMINAL_EXECUTION_ABORTED'
+    });
+    expect(child.child.kill).toHaveBeenCalledWith('SIGTERM');
   });
 });
 

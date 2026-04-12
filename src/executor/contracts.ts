@@ -4,7 +4,12 @@ import type {
   ExportJobSnapshotDto,
   FileEntryDto,
   GetFileResponseDto,
+  TerminalExecutionOutputDto,
+  TerminalExecutionSnapshotDto,
   InitialLocationDto,
+  TerminalTabContentDto,
+  TerminalPoolSnapshotDto,
+  TerminalTabSnapshotDto,
   WorkspaceItemDto
 } from '../types/api';
 
@@ -75,7 +80,32 @@ export interface GatewayTerminalExecutor {
     cwd: string;
     timeoutMs?: number;
     env?: Record<string, string>;
+    signal?: AbortSignal;
   }): Promise<GatewayTerminalExecutionResult>;
+}
+
+export interface GatewayTerminalManager {
+  listTabs(): TerminalPoolSnapshotDto;
+  getTabContent(tabId: string): TerminalTabContentDto;
+  newTab(input?: { title?: string; cwd?: string }): Promise<TerminalTabSnapshotDto>;
+  closeTab(tabId: string, input: { initiatedBy: string }): Promise<TerminalPoolSnapshotDto>;
+  execute(input: {
+    command: string;
+    cwd?: string;
+    tabId?: string;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+  }): Promise<GatewayTerminalExecutionResult & { tabId: string }>;
+  startExecution(input: {
+    command: string;
+    cwd?: string;
+    tabId?: string;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+  }): Promise<TerminalExecutionSnapshotDto>;
+  getExecution(executionId: string): TerminalExecutionSnapshotDto | null;
+  getExecutionOutput(executionId: string): TerminalExecutionOutputDto | null;
+  cancelExecution(executionId: string): boolean;
 }
 
 export interface GatewayExportJobController {
@@ -90,5 +120,5 @@ export interface GatewayExecutor {
   readonly reads: GatewayReadContextExecutor;
   readonly files: GatewayFileExecutor;
   readonly exports: GatewayExportJobController;
-  readonly terminal: GatewayTerminalExecutor;
+  readonly terminal: GatewayTerminalManager;
 }
