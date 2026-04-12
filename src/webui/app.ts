@@ -56,6 +56,42 @@ interface ExportJobSnapshot {
   error: string | null;
 }
 
+interface TerminalTabSnapshot {
+  tabId: string;
+  title: string;
+  cwd: string;
+  status: 'idle' | 'running';
+  isDefault: boolean;
+  lastActiveAt: string;
+  recentCommands: string[];
+}
+
+interface TerminalPoolSnapshot {
+  tabs: TerminalTabSnapshot[];
+  defaultTabId: string | null;
+}
+
+interface TerminalTabContent {
+  tabId: string;
+  title: string;
+  status: 'idle' | 'running';
+  content: string;
+  recentCommands: string[];
+  historyVersion: number;
+}
+
+interface TerminalExecutionResult {
+  tabId: string;
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  combinedOutput: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  warning?: string;
+}
+
 interface ProgressDialogState {
   visible: boolean;
   title: string;
@@ -81,6 +117,8 @@ type UploadTarget = {
   rootId: string;
   path: string;
 };
+
+type ViewMode = 'files' | 'terminal';
 
 type DroppedUploadFile = File & {
   __workspaceWebRelativePath?: string;
@@ -161,6 +199,7 @@ const contextMenu = requireElement<HTMLDivElement>('#contextMenu');
 const uploadInput = requireElement<HTMLInputElement>('#uploadInput');
 const uploadFolderInput = requireElement<HTMLInputElement>('#uploadFolderInput');
 const settingsButton = requireElement<HTMLButtonElement>('#settingsButton');
+const terminalEntryButton = createToolbarButton('openTerminalButton', '终端');
 const uploadChoiceDialog = requireElement<HTMLDivElement>('#uploadChoiceDialog');
 const uploadFileChoiceButton = requireElement<HTMLButtonElement>('#uploadFileChoiceButton');
 const uploadFolderChoiceButton = requireElement<HTMLButtonElement>('#uploadFolderChoiceButton');
@@ -183,6 +222,9 @@ const exportProgressMessages = requireElement<HTMLDivElement>('#exportProgressMe
 const exportProgressCloseButton = requireElement<HTMLButtonElement>('#exportProgressCloseButton');
 const exportProgressCancelButton = requireElement<HTMLButtonElement>('#exportProgressCancelButton');
 const expandedNodesStorageKey = 'workspaceWebGateway.expandedNodes.v1';
+const TERMINAL_AUTO_REFRESH_INTERVAL_MS = 1_000;
+
+settingsButton.insertAdjacentElement('afterend', terminalEntryButton);
 
 const state = {
   roots: [] as WorkspaceItem[],
@@ -199,13 +241,18 @@ const state = {
   search: '',
   sortKey: 'name' as 'name' | 'type' | 'size' | 'mtime',
   sortDirection: 'asc' as 'asc' | 'desc',
+  viewMode: 'files' as ViewMode,
   clipboard: null as ClipboardState | null,
   tabs: [] as TabState[],
   activeTabId: '' as string,
+  terminalTabs: [] as TerminalTabSnapshot[],
+  activeTerminalTabId: '' as string,
+  terminalContentByTabId: new Map<string, TerminalTabContent>(),
   dragItems: null as ClipboardEntry[] | null,
   contextTarget: null as { kind: 'entry' | 'tree'; path: string; type: 'file' | 'directory'; rootId: string } | null,
   disguiseSettings: null as DisguiseImageSettings | null,
   disguiseSelectedFileName: '未选择文件' as string,
+  terminalScrollToBottom: false,
   marqueeSelection: {
     active: false,
     startX: 0,
@@ -277,6 +324,7 @@ function bindEvents() {
   requireElement<HTMLButtonElement>('#exportDisguisedImageButton').addEventListener('click', () => void exportSelection('disguised-image'));
   requireElement<HTMLButtonElement>('#uploadTriggerButton').addEventListener('click', () => openUploadChoiceDialog());
   settingsButton.addEventListener('click', () => void openDisguiseSettings());
+  terminalEntryButton.addEventListener('click', () => void openTerminalPage());
   disguiseSettingsSaveButton.addEventListener('click', () => void saveDisguiseSettings());
   disguiseSettingsCloseButton.addEventListener('click', () => closeDisguiseSettings());
   disguiseCustomInput.addEventListener('change', () => void handleDisguiseCustomImageChange());
@@ -374,6 +422,19 @@ function bindEvents() {
 
     finishMarqueeSelection();
   }, { signal: documentEventsController.signal });
+
+  const terminalRefreshTimer = window.setInterval(() => {
+    if (state.viewMode !== 'terminal' || !state.activeTerminalTabId || document.hidden) {
+      return;
+    }
+
+    void refreshTerminalState()
+      .then(() => renderViewer())
+      .catch(handleUiError);
+  }, TERMINAL_AUTO_REFRESH_INTERVAL_MS);
+  documentEventsController.signal.addEventListener('abort', () => {
+    window.clearInterval(terminalRefreshTimer);
+  }, { once: true });
 }
 
 async function refreshCurrentDirectory() {
@@ -717,6 +778,15 @@ function renderViewer() {
   tabStrip.innerHTML = '';
   viewerToolbar.innerHTML = '';
   viewerSurface.innerHTML = '';
+  viewerSurface.style.display = 'block';
+  viewerSurface.style.flexDirection = '';
+
+  if (state.viewMode === 'terminal') {
+    viewerSurface.style.display = 'flex';
+    viewerSurface.style.flexDirection = 'column';
+    renderTerminalViewer();
+    return;
+  }
 
   for (const tab of state.tabs) {
     const item = document.createElement('button');
@@ -759,6 +829,157 @@ function renderViewer() {
 
   renderViewerToolbar(activeTab);
   renderTabContent(activeTab);
+}
+
+function renderTerminalViewer() {
+  for (const tab of state.terminalTabs) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = `tab-item terminal-tab-item${tab.tabId === state.activeTerminalTabId ? ' is-active' : ''}`;
+    item.addEventListener('click', () => {
+      void activateTerminalTab(tab.tabId);
+    });
+
+    const title = document.createElement('span');
+    title.className = 'tab-title';
+    title.textContent = tab.tabId;
+
+    const runningDot = document.createElement('span');
+    runningDot.className = 'terminal-tab-running-dot';
+    runningDot.textContent = '●';
+    runningDot.hidden = tab.status !== 'running';
+    runningDot.style.color = '#22c55e';
+    runningDot.style.marginRight = '6px';
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'tab-close';
+    close.textContent = '×';
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void closeTerminalTab(tab.tabId);
+    });
+
+    item.append(runningDot, title, close);
+    tabStrip.appendChild(item);
+  }
+
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'tab-item terminal-tab-add';
+  addButton.textContent = '+';
+  addButton.setAttribute('aria-label', '新建终端 Tab');
+  addButton.addEventListener('click', () => {
+    void createTerminalTab();
+  });
+  tabStrip.appendChild(addButton);
+
+  const activeTab = state.terminalTabs.find((tab) => tab.tabId === state.activeTerminalTabId) ?? null;
+  const activeContent = activeTab ? state.terminalContentByTabId.get(activeTab.tabId) ?? null : null;
+
+  const title = document.createElement('strong');
+  title.textContent = activeTab ? `${activeTab.title}${activeTab.cwd ? ` · ${activeTab.cwd}` : ''}` : '终端';
+  viewerToolbar.appendChild(title);
+
+  const spacer = document.createElement('div');
+  spacer.style.flex = '1';
+  viewerToolbar.appendChild(spacer);
+
+  const refreshButton = document.createElement('button');
+  refreshButton.type = 'button';
+  refreshButton.textContent = '刷新终端';
+  refreshButton.addEventListener('click', () => {
+    void refreshTerminalState();
+  });
+  viewerToolbar.appendChild(refreshButton);
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'terminal-view';
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.flex = '1 1 0%';
+  wrapper.style.minHeight = '0';
+  wrapper.style.gap = '0';
+  wrapper.style.overflow = 'hidden';
+
+  const output = document.createElement('pre');
+  output.className = 'terminal-output';
+  output.textContent = activeContent?.content ?? (activeTab ? '暂无终端输出。' : '当前还没有终端 Tab。');
+  output.style.margin = '0';
+  output.style.padding = '16px';
+  output.style.borderRadius = '12px';
+  output.style.background = '#111827';
+  output.style.color = '#e5e7eb';
+  output.style.flex = '1';
+  output.style.minHeight = '0';
+  output.style.height = '100%';
+  output.style.overflow = 'auto';
+  output.style.whiteSpace = 'pre-wrap';
+  output.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+
+  const outputCard = document.createElement('div');
+  outputCard.className = 'terminal-output-card';
+  outputCard.style.display = 'flex';
+  outputCard.style.flexDirection = 'column';
+  outputCard.style.flex = '1 1 0%';
+  outputCard.style.minHeight = '160px';
+  outputCard.appendChild(output);
+  wrapper.appendChild(outputCard);
+
+  const form = document.createElement('form');
+  form.className = 'terminal-input-row';
+  form.style.display = 'flex';
+  form.style.flexDirection = 'column';
+  form.style.gap = '8px';
+  form.style.flex = '0 0 auto';
+
+  const input = document.createElement('textarea');
+  input.className = 'terminal-command-input';
+  input.placeholder = '输入终端命令';
+  input.style.flex = '0 0 auto';
+  input.style.resize = 'none';
+  input.style.minHeight = '72px';
+  input.style.height = '96px';
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+
+    if (event.ctrlKey) {
+      event.preventDefault();
+      insertTextareaText(input, '\n');
+      return;
+    }
+
+    event.preventDefault();
+    form.requestSubmit();
+  });
+
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.textContent = '执行';
+  submit.style.alignSelf = 'flex-end';
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const command = input.value.trim();
+    if (!command) {
+      return;
+    }
+    input.value = '';
+    void executeTerminalCommand(command);
+  });
+
+  form.append(input, submit);
+  wrapper.appendChild(form);
+  viewerSurface.appendChild(wrapper);
+
+  if (state.terminalScrollToBottom) {
+    queueMicrotask(() => {
+      output.scrollTop = output.scrollHeight;
+    });
+    state.terminalScrollToBottom = false;
+  }
 }
 
 function renderViewerToolbar(tab: TabState) {
@@ -942,6 +1163,7 @@ async function openEntry(entry: FileEntry) {
 }
 
 async function openFileTab(rootId: string, entry: FileEntry) {
+  state.viewMode = 'files';
   const existing = state.tabs.find((tab) => tab.rootId === rootId && tab.path === entry.path);
   if (existing) {
     state.activeTabId = existing.id;
@@ -1025,6 +1247,117 @@ function closeTab(tabId: string) {
     state.activeTabId = state.tabs[state.tabs.length - 1]?.id ?? '';
   }
 
+  renderViewer();
+}
+
+async function openTerminalPage() {
+  state.viewMode = 'terminal';
+  await refreshTerminalState({ preferDefault: true });
+  renderViewer();
+}
+
+async function refreshTerminalState(options: { preferDefault?: boolean } = {}) {
+  const snapshot = await api<TerminalPoolSnapshot>('/api/terminal/tabs');
+  state.terminalTabs = snapshot.tabs;
+
+  const activeTabExists = state.terminalTabs.some((tab) => tab.tabId === state.activeTerminalTabId);
+  const nextActiveTabId = options.preferDefault || !activeTabExists
+    ? snapshot.defaultTabId ?? snapshot.tabs[0]?.tabId ?? ''
+    : state.activeTerminalTabId;
+
+  state.activeTerminalTabId = nextActiveTabId;
+  if (nextActiveTabId) {
+    await loadTerminalTabContent(nextActiveTabId);
+  }
+}
+
+async function activateTerminalTab(tabId: string) {
+  state.viewMode = 'terminal';
+  state.activeTerminalTabId = tabId;
+  await loadTerminalTabContent(tabId);
+  renderViewer();
+}
+
+async function loadTerminalTabContent(tabId: string) {
+  const content = await api<TerminalTabContent>(`/api/terminal/tabs/${encodeURIComponent(tabId)}/content`);
+  state.terminalContentByTabId.set(tabId, {
+    ...content,
+    content: sanitizeTerminalDisplayText(content.content)
+  });
+}
+
+async function createTerminalTab() {
+  const created = await api<TerminalTabSnapshot>('/api/terminal/tabs', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      workspaceId: state.currentRootId,
+      cwdPath: state.currentPath,
+      title: 'Terminal'
+    })
+  });
+
+  state.activeTerminalTabId = created.tabId;
+  await refreshTerminalState();
+  await loadTerminalTabContent(created.tabId);
+  renderViewer();
+}
+
+async function closeTerminalTab(tabId: string) {
+  const tab = state.terminalTabs.find((item) => item.tabId === tabId);
+  if (!tab) {
+    return;
+  }
+
+  if (tab.isDefault && !window.confirm('当前是默认终端 Tab，关闭后将清空默认 Tab，是否继续？')) {
+    return;
+  }
+
+  await api(`/api/terminal/tabs/${encodeURIComponent(tabId)}`, {
+    method: 'DELETE'
+  });
+  state.terminalContentByTabId.delete(tabId);
+  await refreshTerminalState({ preferDefault: true });
+  renderViewer();
+}
+
+async function executeTerminalCommand(command: string) {
+  let tabId = state.activeTerminalTabId;
+  if (!tabId) {
+    const created = await api<TerminalTabSnapshot>('/api/terminal/tabs', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        workspaceId: state.currentRootId,
+        cwdPath: state.currentPath,
+        title: 'Terminal'
+      })
+    });
+    tabId = created.tabId;
+  }
+
+  const result = await api<TerminalExecutionResult>('/api/terminal/execute', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      tabId,
+      command,
+      workspaceId: state.currentRootId,
+      cwdPath: state.currentPath
+    })
+  });
+
+  state.activeTerminalTabId = result.tabId;
+  state.terminalScrollToBottom = true;
+  await refreshTerminalState();
+  await loadTerminalTabContent(result.tabId);
+  setStatus(result.warning ?? `终端已执行：${command}`);
   renderViewer();
 }
 
@@ -1800,6 +2133,21 @@ function getPageAccessToken() {
   return new URLSearchParams(window.location.search).get('token') ?? '';
 }
 
+function insertTextareaText(textarea: HTMLTextAreaElement, text: string) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  textarea.value = `${textarea.value.slice(0, start)}${text}${textarea.value.slice(end)}`;
+  const nextPosition = start + text.length;
+  textarea.selectionStart = nextPosition;
+  textarea.selectionEnd = nextPosition;
+}
+
+function sanitizeTerminalDisplayText(value: string) {
+  return value
+    .replace(new RegExp('\\u001b\\][^\\u0007\\u001b]*(?:\\u0007|\\u001b\\\\)', 'g'), '')
+    .replace(new RegExp('\\u001b\\[[0-9;?]*[ -/]*[@-~]', 'g'), '');
+}
+
 async function resolveUploadTarget(targetOverride?: UploadTarget): Promise<UploadTarget | null> {
   if (targetOverride) {
     return targetOverride;
@@ -2485,6 +2833,14 @@ function normalizePromptName(value: string): string | null {
 function handleUiError(error: unknown) {
   const message = error instanceof Error ? error.message : '发生未知错误';
   setStatus(message);
+}
+
+function createToolbarButton(id: string, label: string) {
+  const button = document.createElement('button');
+  button.id = id;
+  button.type = 'button';
+  button.textContent = label;
+  return button;
 }
 
 function requireElement<T extends Element>(selector: string): T {
