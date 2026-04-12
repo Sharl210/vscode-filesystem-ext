@@ -2,6 +2,11 @@ src/**
 test/**
 docs/**
 .sisyphus/**
+.worktrees/**
+node_modules/**
+.git/**
+.gitignore
+package-lock.json
 tsconfig.json
 vitest.config.ts
 esbuild.mjs
