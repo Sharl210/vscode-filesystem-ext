@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 interface CapturedRouterDependencies {
   auth: unknown;
   executor: unknown;
+  terminalManager?: unknown;
   getDisguiseImageSettings(): Promise<unknown>;
   saveDisguiseImageSettings(settings: {
     selectedSource: 'template' | 'custom';
@@ -108,6 +109,17 @@ const mocked = vi.hoisted(() => {
     getIndexHtml: vi.fn(() => '<html />'),
     getStaticAsset: vi.fn(() => staticAsset)
   };
+  const terminalManager = {
+    listTabs: vi.fn(() => ({ tabs: [], defaultTabId: null })),
+    getTabContent: vi.fn(),
+    newTab: vi.fn(),
+    closeTab: vi.fn(),
+    execute: vi.fn(),
+    startExecution: vi.fn(),
+    getExecution: vi.fn(),
+    getExecutionOutput: vi.fn(),
+    cancelExecution: vi.fn()
+  };
   const executor = {
     reads: {
       getWorkspaces: vi.fn(() => [executorWorkspace]),
@@ -127,6 +139,13 @@ const mocked = vi.hoisted(() => {
       body: new Uint8Array()
     }))
   };
+  const mcpRouter = {
+    handle: vi.fn(async () => ({
+      status: 200,
+      headers: {},
+      body: new Uint8Array()
+    }))
+  };
 
   return {
     authState,
@@ -135,7 +154,11 @@ const mocked = vi.hoisted(() => {
     createExportJobsManager: vi.fn(() => exportJobs),
     createFileService: vi.fn(() => fileService),
     createLocalGatewayExecutor: vi.fn(() => executor),
+    createCompatibilityTerminalBackend: vi.fn(() => ({ kind: 'compatibility-backend' })),
+    createTerminalSessionManager: vi.fn(() => terminalManager),
+    createVsCodeTerminalBackend: vi.fn(() => ({ kind: 'vscode-terminal-backend' })),
     createNodeServerFactory: vi.fn(() => ({ start: vi.fn() })),
+    createMcpRouter: vi.fn(() => mcpRouter),
     createRouter: vi.fn((dependencies: unknown) => {
       void dependencies;
       return router;
@@ -173,10 +196,12 @@ const mocked = vi.hoisted(() => {
     }),
     resolveConnectionInfo: vi.fn(() => localConnectionInfo),
     resolveWorkspacePath: vi.fn(() => 'resolved-directly'),
+    mcpRouter,
     router,
     staticAsset,
     staticAssets,
     statusBarItem,
+    terminalManager,
     mcpServiceState,
     serviceState,
     showInformationMessage,
@@ -198,6 +223,7 @@ vi.mock('vscode', () => ({
   },
   window: {
     activeTextEditor: null,
+    createTerminal: vi.fn(),
     createStatusBarItem: mocked.createStatusBarItem,
     showInformationMessage: mocked.showInformationMessage
   },
@@ -233,10 +259,6 @@ vi.mock('../../src/executor/localGatewayExecutor', () => ({
   createLocalGatewayExecutor: mocked.createLocalGatewayExecutor
 }));
 
-vi.mock('../../src/executor/terminalExecutor', () => ({
-  createTerminalExecutor: vi.fn(() => ({ execute: vi.fn() }))
-}));
-
 vi.mock('../../src/server/auth', () => ({
   createAuthState: mocked.createAuthState
 }));
@@ -245,8 +267,24 @@ vi.mock('../../src/server/createServer', () => ({
   createNodeServerFactory: mocked.createNodeServerFactory
 }));
 
+vi.mock('../../src/server/mcpRouter', () => ({
+  createMcpRouter: mocked.createMcpRouter
+}));
+
 vi.mock('../../src/server/router', () => ({
   createRouter: mocked.createRouter
+}));
+
+vi.mock('../../src/terminal/compatibilityTerminalBackend', () => ({
+  createCompatibilityTerminalBackend: mocked.createCompatibilityTerminalBackend
+}));
+
+vi.mock('../../src/terminal/sessionManager', () => ({
+  createTerminalSessionManager: mocked.createTerminalSessionManager
+}));
+
+vi.mock('../../src/terminal/vscodeTerminalBackend', () => ({
+  createVsCodeTerminalBackend: mocked.createVsCodeTerminalBackend
 }));
 
 vi.mock('../../src/server/staticAssets', () => ({
@@ -325,6 +363,7 @@ describe('gateway command composition', () => {
       expect.objectContaining({
         fileService: mocked.fileService,
         exportJobs: mocked.exportJobs,
+        terminal: mocked.terminalManager,
         reads: expect.objectContaining({
           getWorkspaces: expect.any(Function),
           getInitialLocation: expect.any(Function),
@@ -346,6 +385,7 @@ describe('gateway command composition', () => {
 
     expect(routerDependencies.auth).toBe(mocked.authState);
     expect(routerDependencies.executor).toBe(mocked.executor);
+    expect(routerDependencies.terminalManager).toBe(mocked.terminalManager);
     expect(routerDependencies).not.toHaveProperty('exportJobs');
     expect(routerDependencies).not.toHaveProperty('exportFiles');
     await expect(routerDependencies.getDisguiseImageSettings()).resolves.toBe(mocked.disguiseImageSettings);
@@ -366,6 +406,11 @@ describe('gateway command composition', () => {
     });
     expect(mocked.staticAssets.getIndexHtml).toHaveBeenCalledTimes(1);
     expect(mocked.staticAssets.getStaticAsset).toHaveBeenCalledWith('/app.js');
+    expect(mocked.createTerminalSessionManager).toHaveBeenCalledTimes(1);
+    expect(mocked.createMcpRouter).toHaveBeenCalledWith({
+      executor: mocked.executor,
+      path: '/mcp'
+    });
     expect(mocked.mcpServiceState.ensureStarted).toHaveBeenCalledTimes(1);
     expect(mocked.statusBarItem.tooltip).toContain('MCP：http://127.0.0.1:21080/mcp');
   });

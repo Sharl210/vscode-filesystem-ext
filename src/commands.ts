@@ -1,7 +1,6 @@
 import os from 'node:os';
 import * as vscode from 'vscode';
 import { createLocalGatewayExecutor } from './executor/localGatewayExecutor';
-import { createTerminalExecutor } from './executor/terminalExecutor';
 import { createAuthState } from './server/auth';
 import { createNodeServerFactory } from './server/createServer';
 import { createMcpRouter } from './server/mcpRouter';
@@ -10,6 +9,9 @@ import { createStaticAssets } from './server/staticAssets';
 import { createDisguiseImageSettingsStore } from './state/disguiseImageSettings';
 import { createExportJobsManager } from './state/exportJobs';
 import { createServiceState } from './state/serviceState';
+import { createCompatibilityTerminalBackend } from './terminal/compatibilityTerminalBackend';
+import { createTerminalSessionManager } from './terminal/sessionManager';
+import { createVsCodeTerminalBackend } from './terminal/vscodeTerminalBackend';
 import type { InitialLocationDto, WorkspaceItemDto } from './types/api';
 import { collectAccessibleRoots } from './workspace/accessibleRoots';
 import { resolveConnectionInfo } from './workspace/connectionInfo';
@@ -34,6 +36,14 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     includeTokenInLocalUrl: false
   });
   const disguiseImageSettingsStore = createDisguiseImageSettingsStore(context.globalState);
+  const terminalManager = createTerminalSessionManager(
+    createVsCodeTerminalBackend({
+      createTerminal: (options) => vscode.window.createTerminal(options),
+      compatibilityBackend: createCompatibilityTerminalBackend({
+        shellPath: vscode.env.shell || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')
+      })
+    })
+  );
   const exportJobs = createExportJobsManager({
     fileService,
     getDisguiseImageSettings() {
@@ -59,14 +69,13 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
     },
     fileService,
     exportJobs,
-    terminal: createTerminalExecutor({
-      shellPath: vscode.env.shell || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')
-    })
+    terminal: terminalManager
   });
 
   const router = createRouter({
     auth: authState,
     executor,
+    terminalManager,
     getDisguiseImageSettings() {
       return disguiseImageSettingsStore.getSettings();
     },
@@ -80,7 +89,10 @@ export function registerGatewayCommands(context: vscode.ExtensionContext): Array
       return staticAssets.getStaticAsset(pathname);
     }
   });
-  const mcpRouter = createMcpRouter({ executor });
+  const mcpRouter = createMcpRouter({
+    executor,
+    path: mcpConfig.path
+  });
   let mcpEndpoint: string | null = null;
   let mcpStatusDetail: string | null = null;
 

@@ -390,7 +390,11 @@ button {
 }
 
 .viewer-surface {
+  display: flex;
+  flex: 1;
   padding: 14px;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .viewer-empty,
