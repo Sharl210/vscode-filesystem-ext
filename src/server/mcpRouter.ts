@@ -340,7 +340,7 @@ const MCP_TOOLS: McpToolDefinition[] = [
   defineTool('showTerminalTabContent', 'show_terminal_tab_content 的 camelCase 别名。', {
     tabId: TAB_ID_PROPERTY
   }, ['tabId']),
-  defineTool('terminal_execute', '同步执行终端命令并等待结果。必填 command；可选 tabId、workspaceId、cwdPath、timeoutMs、mode、shellIntegrationWaitMs。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。', {
+  defineTool('terminal_execute', '同步执行终端命令并等待结果。必填 command；可选 tabId、workspaceId、cwdPath、timeoutMs、mode、shellIntegrationWaitMs。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。在 vscode-terminal 模式下 exitCode 可能为 null。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
     command: COMMAND_PROPERTY,
     tabId: TAB_ID_PROPERTY,
@@ -358,7 +358,7 @@ const MCP_TOOLS: McpToolDefinition[] = [
     mode: TERMINAL_MODE_PROPERTY,
     shellIntegrationWaitMs: SHELL_WAIT_PROPERTY
   }, ['command']),
-  defineTool('start_terminal_execution', '启动后台终端任务，立即返回 executionId。后续配合 get_terminal_execution 与 get_terminal_execution_output。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。', {
+  defineTool('start_terminal_execution', '启动后台终端任务，立即返回 executionId。后续配合 get_terminal_execution 与 get_terminal_execution_output。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。在 vscode-terminal 模式下最终 exitCode 可能为 null。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
     command: COMMAND_PROPERTY,
     tabId: TAB_ID_PROPERTY,
