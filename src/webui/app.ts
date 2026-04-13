@@ -899,7 +899,7 @@ function renderTerminalViewer() {
   wrapper.style.flexDirection = 'column';
   wrapper.style.flex = '1 1 0%';
   wrapper.style.minHeight = '0';
-  wrapper.style.gap = '0';
+  wrapper.style.gap = '12px';
   wrapper.style.overflow = 'hidden';
 
   const output = document.createElement('pre');
@@ -930,7 +930,7 @@ function renderTerminalViewer() {
   form.className = 'terminal-input-row';
   form.style.display = 'flex';
   form.style.flexDirection = 'column';
-  form.style.gap = '8px';
+  form.style.gap = '6px';
   form.style.flex = '0 0 auto';
 
   const input = document.createElement('textarea');
@@ -938,8 +938,8 @@ function renderTerminalViewer() {
   input.placeholder = '输入终端命令';
   input.style.flex = '0 0 auto';
   input.style.resize = 'none';
-  input.style.minHeight = '72px';
-  input.style.height = '96px';
+  input.style.minHeight = '48px';
+  input.style.height = '64px';
   input.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') {
       return;

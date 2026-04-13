@@ -88,7 +88,8 @@ describe('webui terminal page', () => {
 
     expect(document.querySelector('.terminal-tab-item .tab-title')?.textContent).toBe('tab-1');
     expect(document.querySelector('.terminal-tab-running-dot')).toBeTruthy();
-    expect(document.querySelector('.terminal-command-input')).toBeTruthy();
+    expect((document.querySelector<HTMLTextAreaElement>('.terminal-command-input')?.style.height)).toBe('64px');
+    expect((document.querySelector<HTMLDivElement>('.terminal-view')?.style.gap)).toBe('12px');
   });
 
   it('filters shell integration control sequences from terminal display content', async () => {
@@ -207,7 +208,7 @@ function createTerminalFetchMock(
         ok: true,
         data: {
           tabId: 'tab-1',
-          title: 'Terminal',
+          title: 'tab-1',
           cwd: '/workspace/demo',
           status: 'idle',
           isDefault: true,
