@@ -610,7 +610,7 @@ async function handleMethod(request: JsonRpcRequest, dependencies: McpRouterDepe
       },
       serverInfo: {
         name: MCP_SERVER_NAME,
-        version: '0.0.10'
+        version: '0.0.12'
       }
     };
   }
