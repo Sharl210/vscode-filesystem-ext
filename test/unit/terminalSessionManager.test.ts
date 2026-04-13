@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('terminal session manager', () => {
   it('clears the default tab when the default tab is closed', async () => {
@@ -16,23 +16,63 @@ describe('terminal session manager', () => {
 
   it('creates a new tab when execute is called without tabId and no default exists', async () => {
     const { createTerminalSessionManager } = await import('../../src/terminal/sessionManager.js');
-    const manager = createTerminalSessionManager(createBackendStub());
+    const backend = createBackendStub();
+    const manager = createTerminalSessionManager(backend);
 
     const result = await manager.execute({ command: 'pwd', cwd: '/workspace/demo' });
     const snapshot = manager.listTabs();
 
     expect(result.tabId).toBeTruthy();
+    expect(backend.execute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ timeoutMs: 120000 })
+    );
     expect(snapshot.defaultTabId).toBe(result.tabId);
     expect(snapshot.tabs).toHaveLength(1);
     expect(snapshot.tabs[0]).toEqual({
       tabId: result.tabId,
-      title: 'Terminal',
+      title: result.tabId,
       cwd: '/workspace/demo',
       status: 'idle',
       isDefault: true,
       lastActiveAt: expect.any(String),
       recentCommands: ['pwd']
     });
+  });
+
+  it('writes a queued background command into terminal history before output is finished', async () => {
+    const { createTerminalSessionManager } = await import('../../src/terminal/sessionManager.js');
+    let releaseExecution: (() => void) | undefined;
+    const manager = createTerminalSessionManager({
+      async createSession(input: { tabId: string; cwd: string }) {
+        return { sessionId: input.tabId, cwd: input.cwd };
+      },
+      async execute(_session: { cwd: string }, input: { command: string; cwd: string; signal?: AbortSignal }) {
+        await new Promise<void>((resolve) => {
+          releaseExecution = resolve;
+        });
+        return {
+          command: input.command,
+          cwd: input.cwd,
+          stdout: 'done\n',
+          stderr: '',
+          combinedOutput: 'done\n',
+          exitCode: 0,
+          timedOut: false
+        };
+      },
+      async closeSession() {}
+    });
+
+    const tab = await manager.newTab({ cwd: '/workspace/demo' });
+    const started = await manager.startExecution({ tabId: tab.tabId, command: 'echo queued' });
+
+    await waitFor(async () => manager.getExecution(started.executionId)?.status === 'running');
+    expect(manager.getTabContent(tab.tabId).content).toContain('$ echo queued');
+
+    releaseExecution?.();
+    await waitFor(async () => manager.getExecution(started.executionId)?.status === 'completed');
+    expect(manager.getTabContent(tab.tabId).content).toContain('done');
   });
 
   it('does not transition a queued cancelled execution into running when earlier work finishes', async () => {
@@ -114,13 +154,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, attempts = 30) {
 
 function createBackendStub() {
   return {
-    async createSession(input: { tabId: string; cwd: string }) {
-      return {
-        sessionId: input.tabId,
-        cwd: input.cwd
-      };
-    },
-    async execute(session: { cwd: string }, input: { command: string; cwd: string }) {
+    execute: vi.fn(async (session: { cwd: string }, input: { command: string; cwd: string }) => {
       return {
         command: input.command,
         cwd: input.cwd || session.cwd,
@@ -129,6 +163,12 @@ function createBackendStub() {
         combinedOutput: '',
         exitCode: 0,
         timedOut: false
+      };
+    }),
+    async createSession(input: { tabId: string; cwd: string }) {
+      return {
+        sessionId: input.tabId,
+        cwd: input.cwd
       };
     },
     async closeSession() {}

@@ -5,7 +5,15 @@ interface TerminalSessionBackend {
   createSession(input: { tabId: string; title: string; cwd: string }): Promise<TerminalBackendSession>;
   execute(
     session: TerminalBackendSession,
-    input: { command: string; cwd: string; timeoutMs?: number; env?: Record<string, string>; signal?: AbortSignal }
+    input: {
+      command: string;
+      cwd: string;
+      timeoutMs?: number;
+      env?: Record<string, string>;
+      signal?: AbortSignal;
+      mode?: 'auto' | 'compatibility';
+      shellIntegrationWaitMs?: number;
+    }
   ): Promise<GatewayTerminalExecutionResult>;
   closeSession(session: TerminalBackendSession, input: { initiatedBy: string }): Promise<void>;
 }
@@ -47,6 +55,7 @@ interface TerminalExecutionState {
 }
 
 const MAX_RECENT_COMMANDS = 15;
+const DEFAULT_TERMINAL_TIMEOUT_MS = 120_000;
 
 export function createTerminalSessionManager(backend: TerminalSessionBackend) {
   const tabs = new Map<string, TerminalTabState>();
@@ -81,7 +90,7 @@ export function createTerminalSessionManager(backend: TerminalSessionBackend) {
     async newTab(input: { title?: string; cwd?: string } = {}): Promise<TerminalTabSnapshotDto> {
       const tabId = `tab-${nextTabId++}`;
       const now = new Date().toISOString();
-      const title = input.title ?? 'Terminal';
+      const title = input.title ?? tabId;
       const cwd = input.cwd ?? '';
       const session = await backend.createSession({ tabId, title, cwd });
       const tab: TerminalTabState = {
@@ -127,6 +136,8 @@ export function createTerminalSessionManager(backend: TerminalSessionBackend) {
       tabId?: string;
       timeoutMs?: number;
       env?: Record<string, string>;
+      mode?: 'auto' | 'compatibility';
+      shellIntegrationWaitMs?: number;
     }): Promise<GatewayTerminalExecutionResult & { tabId: string }> {
       let tabId = input.tabId ?? defaultTabId;
 
@@ -146,24 +157,29 @@ export function createTerminalSessionManager(backend: TerminalSessionBackend) {
         const executionCwd = input.cwd ?? tab.cwd;
         tab.cwd = executionCwd;
         tab.session.cwd = executionCwd;
+        tab.lastActiveAt = new Date().toISOString();
+        tab.recentCommands.push(input.command);
+        tab.content = appendTerminalCommand(tab.content, input.command);
+        tab.historyVersion += 1;
+        if (tab.recentCommands.length > MAX_RECENT_COMMANDS) {
+          tab.recentCommands.splice(0, tab.recentCommands.length - MAX_RECENT_COMMANDS);
+        }
 
         try {
           const result = await backend.execute(tab.session, {
             command: input.command,
             cwd: executionCwd,
-            timeoutMs: input.timeoutMs,
-            env: input.env
+            timeoutMs: input.timeoutMs ?? DEFAULT_TERMINAL_TIMEOUT_MS,
+            env: input.env,
+            mode: input.mode,
+            shellIntegrationWaitMs: input.shellIntegrationWaitMs
           });
 
           tab.cwd = result.cwd;
           tab.session.cwd = result.cwd;
           tab.lastActiveAt = new Date().toISOString();
-          tab.recentCommands.push(input.command);
-          tab.content = appendTerminalHistory(tab.content, input.command, result.combinedOutput);
+          tab.content = appendTerminalOutput(tab.content, result.combinedOutput);
           tab.historyVersion += 1;
-          if (tab.recentCommands.length > MAX_RECENT_COMMANDS) {
-            tab.recentCommands.splice(0, tab.recentCommands.length - MAX_RECENT_COMMANDS);
-          }
 
           return {
             ...result,
@@ -188,6 +204,8 @@ export function createTerminalSessionManager(backend: TerminalSessionBackend) {
       tabId?: string;
       timeoutMs?: number;
       env?: Record<string, string>;
+      mode?: 'auto' | 'compatibility';
+      shellIntegrationWaitMs?: number;
     }) {
       const tab = await resolveTabForExecution({
         tabs,
@@ -238,6 +256,13 @@ export function createTerminalSessionManager(backend: TerminalSessionBackend) {
         });
         tab.cwd = executionCwd;
         tab.session.cwd = executionCwd;
+        tab.lastActiveAt = startedAt;
+        tab.recentCommands.push(input.command);
+        tab.content = appendTerminalCommand(tab.content, input.command);
+        tab.historyVersion += 1;
+        if (tab.recentCommands.length > MAX_RECENT_COMMANDS) {
+          tab.recentCommands.splice(0, tab.recentCommands.length - MAX_RECENT_COMMANDS);
+        }
 
         if (abortController.signal.aborted) {
           updateExecutionState(executions, executionId, {
@@ -252,9 +277,11 @@ export function createTerminalSessionManager(backend: TerminalSessionBackend) {
           const result = await backend.execute(tab.session, {
             command: input.command,
             cwd: executionCwd,
-            timeoutMs: input.timeoutMs,
+            timeoutMs: input.timeoutMs ?? DEFAULT_TERMINAL_TIMEOUT_MS,
             env: input.env,
-            signal: abortController.signal
+            signal: abortController.signal,
+            mode: input.mode,
+            shellIntegrationWaitMs: input.shellIntegrationWaitMs
           });
 
           if (abortController.signal.aborted) {
@@ -270,12 +297,8 @@ export function createTerminalSessionManager(backend: TerminalSessionBackend) {
           tab.cwd = result.cwd;
           tab.session.cwd = result.cwd;
           tab.lastActiveAt = new Date().toISOString();
-          tab.recentCommands.push(input.command);
-          tab.content = appendTerminalHistory(tab.content, input.command, result.combinedOutput);
+          tab.content = appendTerminalOutput(tab.content, result.combinedOutput);
           tab.historyVersion += 1;
-          if (tab.recentCommands.length > MAX_RECENT_COMMANDS) {
-            tab.recentCommands.splice(0, tab.recentCommands.length - MAX_RECENT_COMMANDS);
-          }
 
           updateExecutionState(executions, executionId, {
             status: 'completed',
@@ -425,14 +448,14 @@ function toSnapshot(tab: TerminalTabState, defaultTabId: string | null): Termina
   };
 }
 
-function appendTerminalHistory(existingContent: string, command: string, output: string): string {
-  let nextChunk = `$ ${command}\n`;
-  if (output.length > 0) {
-    nextChunk += output;
-  }
-  if (!nextChunk.endsWith('\n')) {
-    nextChunk += '\n';
+function appendTerminalCommand(existingContent: string, command: string): string {
+  return `${existingContent}$ ${command}\n`;
+}
+
+function appendTerminalOutput(existingContent: string, output: string): string {
+  if (output.length === 0) {
+    return existingContent;
   }
 
-  return `${existingContent}${nextChunk}`;
+  return output.endsWith('\n') ? `${existingContent}${output}` : `${existingContent}${output}\n`;
 }

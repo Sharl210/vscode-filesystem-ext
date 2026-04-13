@@ -65,7 +65,9 @@ export function createTerminalRouter(dependencies: TerminalRouterDependencies) {
             tabId: getOptionalStringOrUndefined(payload, 'tabId'),
             command,
             cwd: resolveOptionalTerminalCwd(dependencies.reads, payload),
-            timeoutMs: getOptionalNumber(payload, 'timeoutMs')
+            timeoutMs: getOptionalNumber(payload, 'timeoutMs'),
+            mode: getOptionalMode(payload),
+            shellIntegrationWaitMs: getOptionalNumber(payload, 'shellIntegrationWaitMs')
           })
         );
       }
@@ -83,7 +85,9 @@ export function createTerminalRouter(dependencies: TerminalRouterDependencies) {
             tabId: getOptionalStringOrUndefined(payload, 'tabId'),
             command,
             cwd: resolveOptionalTerminalCwd(dependencies.reads, payload),
-            timeoutMs: getOptionalNumber(payload, 'timeoutMs')
+            timeoutMs: getOptionalNumber(payload, 'timeoutMs'),
+            mode: getOptionalMode(payload),
+            shellIntegrationWaitMs: getOptionalNumber(payload, 'shellIntegrationWaitMs')
           })
         );
       }
@@ -159,6 +163,11 @@ function getOptionalStringOrUndefined(payload: Record<string, unknown>, key: str
 function getOptionalNumber(payload: Record<string, unknown>, key: string): number | undefined {
   const value = payload[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function getOptionalMode(payload: Record<string, unknown>): 'auto' | 'compatibility' | undefined {
+  const value = payload.mode;
+  return value === 'auto' || value === 'compatibility' ? value : undefined;
 }
 
 function resolveOptionalTerminalCwd(

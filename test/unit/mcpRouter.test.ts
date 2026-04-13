@@ -440,6 +440,10 @@ describe('mcp router', () => {
         ])
       }
     });
+
+    const tools = ((listResponse.jsonBody as { result: { tools: Array<{ name: string; description: string }> } }).result.tools);
+    expect(tools.find((tool) => tool.name === 'terminal_execute')?.description).toContain('timeoutMs（默认 120000）');
+    expect(tools.find((tool) => tool.name === 'terminal_execute')?.description).toContain('shellIntegrationWaitMs（默认 30000，可提到 60000）');
   });
 
   it('exposes file mutation, export job, and terminal tools', async () => {
