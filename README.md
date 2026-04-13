@@ -1,8 +1,20 @@
 # VSCode 文件系统拓展
 
-`vscode-filesystem-ext` 是一个 VS Code 文件系统拓展。它通过 VS Code 自身的文件接口，为当前 VS Code 可访问的文件资源提供 Web 管理界面和 MCP 能力。
+`vscode-filesystem-ext` 为 VSCode 导出三类能力：
 
-网页端不会直接碰操作系统文件系统，所有底层读写、删除、重命名、复制、上传、下载和导出都通过 VS Code 代理执行。
+- Web 文件管理界面
+- MCP Streamable HTTP 服务
+- 终端 Tab、同步执行、后台执行与结果读取
+
+网页和 MCP 都不会直接碰操作系统文件系统，底层读写、删除、重命名、复制、上传、下载、导出和终端执行都通过 VS Code 代理完成。
+
+## 特色能力
+
+- **真实 VS Code 终端优先**：默认优先尝试真实 VS Code 终端，再按需回退 compatibility
+- **Web + MCP 共用能力层**：网页和 MCP 走同一套文件、导出、终端执行能力
+- **MCP 单实例**：固定端口、固定路径，多窗口共享同一个 MCP HTTP 实例
+- **终端后台任务**：支持创建 Tab、同步执行、后台执行、状态查询、输出读取与取消
+- **高信息密度工具说明**：MCP 工具说明会标明必填参数、可选参数、默认值与常见错误点
 
 ## 功能说明
 
@@ -15,10 +27,12 @@
 - 支持打包下载
 - 支持导出为伪装图片
 - 支持导出与上传过程进度弹窗、取消和过程信息显示
+- 支持终端 Tab 管理、同步执行、后台执行、取消、状态查询和输出读取
+- 支持 MCP 单实例 HTTP 服务，多窗口共享固定端口
 
 ## 安装说明
 
-1. 下载 Release 中的 `vscode-filesystem-ext-0.0.6.vsix`
+1. 下载 Release 中的 `vscode-filesystem-ext-0.0.12.vsix`
 2. 打开 VS Code
 3. 进入扩展面板
 4. 右上角菜单选择“从 VSIX 安装”
@@ -27,7 +41,7 @@
 也可以命令行安装：
 
 ```bash
-code --install-extension vscode-filesystem-ext-0.0.6.vsix
+code --install-extension vscode-filesystem-ext-0.0.12.vsix
 ```
 
 ## 使用说明
@@ -59,7 +73,7 @@ code --install-extension vscode-filesystem-ext-0.0.6.vsix
 
 扩展提供命令：`工作区网页网关：启动/获取 MCP HTTP 入口`（`workspaceWebGateway.startMcpServer`）。
 
-该命令会启动或复用一个 **MCP 单实例 HTTP 服务**，默认监听 `127.0.0.1:21080`，并把入口地址复制到剪贴板。多个 VS Code 窗口会共享同一个 MCP 端口实例。
+该命令会启动或复用一个 **MCP 单实例 HTTP 服务**，默认监听 `127.0.0.1:21080/mcp`，并把入口地址复制到剪贴板。多个 VS Code 窗口会共享同一个 MCP 端口实例。
 
 MCP HTTP 入口默认**无需鉴权**，可直接对接使用。
 
@@ -112,10 +126,11 @@ url = "http://127.0.0.1:21080/mcp"
 
 这个 MCP 不是“单独的文件型 MCP”或“单独的终端型 MCP”，而是 **VSCode 文件系统拓展** 提供的同一个 MCP 服务，同时具备：
 
-- 尽可能完整的文件工具能力
-- 一个终端执行兜底工具 `terminal_execute`
+- 文件读写、复制、移动、删除、导出能力
+- 终端 Tab 管理、同步执行、后台执行、取消和输出读取能力
+- 统一的 MCP 服务名：`vscode-filesystem-ext-mcp`
 
-当前文件类工具包括：
+当前文件/导出工具包括：
 
 - `list_workspaces`
 - `list_directory`
@@ -136,9 +151,40 @@ url = "http://127.0.0.1:21080/mcp"
 - `download_export_job`
 - `cancel_export_job`
 
-兜底工具：
+终端工具包括：
 
+- `new_terminal_tab`
+- `close_terminal_tab`
+- `list_terminal_tabs`
+- `show_terminal_tab_content`
 - `terminal_execute`
+- `start_terminal_execution`
+- `get_terminal_execution`
+- `get_terminal_execution_output`
+- `cancel_terminal_execution`
+
+#### 终端参数约定
+
+- `timeoutMs`：不填默认 `120000`（120 秒）
+- `mode`：不填默认 `auto`，可显式指定 `compatibility`
+- `shellIntegrationWaitMs`：不填默认 `30000`，可提高到 `60000`
+- 在 `vscode-terminal` 模式下，`exitCode` 可能为 `null`，这是 VS Code shell integration 的可空边界，不应强行当作 `0`
+
+#### 终端模式说明
+
+- `auto`：默认值。优先尝试真实 VS Code 终端；若 shell integration 在等待窗口内不可用，才回退 compatibility
+- `compatibility`：直接用系统终端执行，不等待 VS Code shell integration
+
+网页终端每 1 秒自动刷新一次，默认终端标题直接使用 `tabId`。
+
+## 当前局限性
+
+- **真实终端可见性是 best-effort，不是强保证**：默认优先走真实 VS Code 终端，但 VS Code shell integration 的可用性受 shell、profile、远程环境和启动时序影响。
+- **auto 模式可能回退 compatibility**：如果在等待窗口内拿不到 shell integration，系统会自动回退到 compatibility，以保证任务可执行。
+- **`exitCode` 在 `vscode-terminal` 模式下可能为 `null`**：这是 VS Code shell integration 的可空边界，不能安全地强行补成 `0`。
+- **网页终端显示的是代理历史，不是 VS Code 终端缓冲区本身**：它会尽量同步命令与输出，但不承诺与 VS Code 终端面板逐字符完全一致。
+- **如果你更重视健壮性，就用默认 `auto`**；如果你明确知道当前环境下真实终端不稳定，可以显式传 `mode=compatibility`。
+- **长环境适配等待可调**：`shellIntegrationWaitMs` 默认 `30000`，可提高到 `60000`；它的作用是减少误判回退，不是保证所有环境都能稳定拿到 shell integration。
 
 #### 文件读取策略
 
