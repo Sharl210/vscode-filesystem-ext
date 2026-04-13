@@ -37,7 +37,15 @@ export function createCompatibilityTerminalBackend(options: CompatibilityTermina
     },
     async execute(
       session: CompatibilityTerminalSession,
-      input: { command: string; cwd: string; timeoutMs?: number; env?: Record<string, string>; signal?: AbortSignal }
+      input: {
+        command: string;
+        cwd: string;
+        timeoutMs?: number;
+        env?: Record<string, string>;
+        signal?: AbortSignal;
+        mode?: 'auto' | 'compatibility';
+        shellIntegrationWaitMs?: number;
+      }
     ): Promise<CompatibilityExecutionResult> {
       const result = await executor.execute({
         command: input.command,

@@ -33,20 +33,32 @@ interface CompatibilityTerminalBackendLike {
   createSession(input: { tabId: string; title: string; cwd: string }): Promise<{ sessionId: string; cwd: string; title: string }>;
   execute(
     session: { sessionId: string; cwd: string; title: string },
-    input: { command: string; cwd: string; timeoutMs?: number; env?: Record<string, string>; signal?: AbortSignal }
+    input: {
+      command: string;
+      cwd: string;
+      timeoutMs?: number;
+      env?: Record<string, string>;
+      signal?: AbortSignal;
+      mode?: 'auto' | 'compatibility';
+      shellIntegrationWaitMs?: number;
+    }
   ): Promise<CompatibilityExecutionResult>;
 }
 
 interface VsCodeTerminalBackendDeps {
   createTerminal: (options: { name: string; cwd?: string }) => VsCodeTerminalLike;
   compatibilityBackend?: CompatibilityTerminalBackendLike;
+  shellIntegrationWaitMs?: number;
+  shellIntegrationPollMs?: number;
 }
 
-const SHELL_INTEGRATION_WAIT_MS = 1_000;
-const SHELL_INTEGRATION_POLL_MS = 20;
+const DEFAULT_SHELL_INTEGRATION_WAIT_MS = 30_000;
+const DEFAULT_SHELL_INTEGRATION_POLL_MS = 1_000;
 
 export function createVsCodeTerminalBackend(deps: VsCodeTerminalBackendDeps) {
   const compatibilityBackend = deps.compatibilityBackend ?? createCompatibilityTerminalBackend();
+  const defaultWaitMs = deps.shellIntegrationWaitMs ?? DEFAULT_SHELL_INTEGRATION_WAIT_MS;
+  const defaultPollMs = deps.shellIntegrationPollMs ?? DEFAULT_SHELL_INTEGRATION_POLL_MS;
 
   return {
     async createSession(input: { tabId: string; title: string; cwd: string }): Promise<VsCodeTerminalSession> {
@@ -68,31 +80,50 @@ export function createVsCodeTerminalBackend(deps: VsCodeTerminalBackendDeps) {
     },
     async execute(
       session: VsCodeTerminalSession,
-      input: { command: string; cwd: string; timeoutMs?: number; env?: Record<string, string>; signal?: AbortSignal }
+      input: {
+        command: string;
+        cwd: string;
+        timeoutMs?: number;
+        env?: Record<string, string>;
+        signal?: AbortSignal;
+        mode?: 'auto' | 'compatibility';
+        shellIntegrationWaitMs?: number;
+      }
     ): Promise<VsCodeExecutionResult | CompatibilityExecutionResult> {
       session.cwd = input.cwd;
       let shouldDisposeTerminal = false;
       let cancelVsCodeExecution: (() => void) | undefined;
+      const waitMs = normalizeShellIntegrationWaitMs(input.shellIntegrationWaitMs, defaultWaitMs);
 
       try {
         if (input.signal?.aborted) {
           throw createCancelledExecutionError();
         }
 
+        if (input.mode === 'compatibility') {
+          return executeInCompatibilityMode({
+            compatibilityBackend,
+            session,
+            input,
+            warning: buildForcedCompatibilityWarning()
+          });
+        }
+
         const terminal = session.terminal ?? createTerminalForSession(session, deps.createTerminal);
         session.terminal = terminal;
         session.shellIntegrationWarmup ??= warmShellIntegration(terminal);
-        terminal.show(false);
         cancelVsCodeExecution = () => {
           terminal.sendText?.('\u0003', false);
         };
         input.signal?.addEventListener('abort', cancelVsCodeExecution, { once: true });
-        const execution = await waitForShellExecution(terminal, input.command, input.signal);
+        terminal.show(false);
+        const execution = await waitForShellExecution(terminal, input.command, waitMs, defaultPollMs, input.signal);
         if (!execution) {
           return executeInCompatibilityMode({
             compatibilityBackend,
             session,
-            input
+            input,
+            warning: buildShellIntegrationTimeoutWarning(waitMs)
           });
         }
 
@@ -150,7 +181,16 @@ export function createVsCodeTerminalBackend(deps: VsCodeTerminalBackendDeps) {
 async function executeInCompatibilityMode(input: {
   compatibilityBackend: CompatibilityTerminalBackendLike;
   session: VsCodeTerminalSession;
-  input: { command: string; cwd: string; timeoutMs?: number; env?: Record<string, string>; signal?: AbortSignal };
+  input: {
+    command: string;
+    cwd: string;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+    signal?: AbortSignal;
+    mode?: 'auto' | 'compatibility';
+    shellIntegrationWaitMs?: number;
+  };
+  warning?: string;
 }) {
   const compatibilitySession = await input.compatibilityBackend.createSession({
     tabId: input.session.sessionId,
@@ -167,7 +207,10 @@ async function executeInCompatibilityMode(input: {
 
   input.session.cwd = fallbackResult.cwd;
 
-  return fallbackResult;
+  return {
+    ...fallbackResult,
+    warning: input.warning ?? fallbackResult.warning
+  };
 }
 
 function createTerminalForSession(
@@ -175,7 +218,7 @@ function createTerminalForSession(
   createTerminal: (options: { name: string; cwd?: string }) => VsCodeTerminalLike
 ) {
   return createTerminal({
-    name: session.title,
+    name: session.sessionId,
     cwd: session.cwd
   });
 }
@@ -189,19 +232,25 @@ function disposeTerminal(session: VsCodeTerminalSession) {
 async function warmShellIntegration(terminal: VsCodeTerminalLike) {
   const startedAt = Date.now();
 
-  while (Date.now() - startedAt <= SHELL_INTEGRATION_WAIT_MS) {
+  while (Date.now() - startedAt <= DEFAULT_SHELL_INTEGRATION_WAIT_MS) {
     if (terminal.shellIntegration?.executeCommand) {
       return;
     }
 
-    await delay(SHELL_INTEGRATION_POLL_MS);
+    await delay(DEFAULT_SHELL_INTEGRATION_POLL_MS);
   }
 }
 
-async function waitForShellExecution(terminal: VsCodeTerminalLike, command: string, signal?: AbortSignal) {
+async function waitForShellExecution(
+  terminal: VsCodeTerminalLike,
+  command: string,
+  waitMs: number,
+  pollMs: number,
+  signal?: AbortSignal
+) {
   const startedAt = Date.now();
 
-  while (Date.now() - startedAt <= SHELL_INTEGRATION_WAIT_MS) {
+  while (Date.now() - startedAt <= waitMs) {
     if (signal?.aborted) {
       throw createCancelledExecutionError();
     }
@@ -211,7 +260,7 @@ async function waitForShellExecution(terminal: VsCodeTerminalLike, command: stri
       return execution;
     }
 
-    await delay(SHELL_INTEGRATION_POLL_MS);
+    await delay(pollMs);
   }
 
   return null;
@@ -233,4 +282,21 @@ function sanitizeVsCodeTerminalOutput(value: string) {
   return value
     .replace(new RegExp('\\u001b\\][^\\u0007\\u001b]*(?:\\u0007|\\u001b\\\\)', 'g'), '')
     .replace(new RegExp('\\u001b\\[[0-9;?]*[ -/]*[@-~]', 'g'), '');
+}
+
+function normalizeShellIntegrationWaitMs(value: number | undefined, fallback: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+
+  return Math.round(value);
+}
+
+function buildShellIntegrationTimeoutWarning(waitMs: number) {
+  const seconds = Math.round(waitMs / 1000);
+  return `真实 VS Code 终端已等待 ${seconds} 秒仍未拿到 shell integration，已自动回退到 compatibility。下次可直接设置 mode=compatibility，或把 shellIntegrationWaitMs 提高到更大的值（例如 60000）。`;
+}
+
+function buildForcedCompatibilityWarning() {
+  return '已按 mode=compatibility 直接使用系统终端执行，未尝试 VS Code shell integration。';
 }

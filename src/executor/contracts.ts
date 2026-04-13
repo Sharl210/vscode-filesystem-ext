@@ -95,6 +95,8 @@ export interface GatewayTerminalManager {
     tabId?: string;
     timeoutMs?: number;
     env?: Record<string, string>;
+    mode?: 'auto' | 'compatibility';
+    shellIntegrationWaitMs?: number;
   }): Promise<GatewayTerminalExecutionResult & { tabId: string }>;
   startExecution(input: {
     command: string;
@@ -102,6 +104,8 @@ export interface GatewayTerminalManager {
     tabId?: string;
     timeoutMs?: number;
     env?: Record<string, string>;
+    mode?: 'auto' | 'compatibility';
+    shellIntegrationWaitMs?: number;
   }): Promise<TerminalExecutionSnapshotDto>;
   getExecution(executionId: string): TerminalExecutionSnapshotDto | null;
   getExecutionOutput(executionId: string): TerminalExecutionOutputDto | null;

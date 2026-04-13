@@ -19,7 +19,7 @@ describe('vscode terminal backend', () => {
         })
       }
     });
-    const session = await backend.createSession({ tabId: 'tab-1', title: 'Terminal', cwd: '/workspace/demo' });
+    const session = await backend.createSession({ tabId: 'tab-1', title: 'tab-1', cwd: '/workspace/demo' });
     const controller = new AbortController();
 
     const running = backend.execute(session, {
