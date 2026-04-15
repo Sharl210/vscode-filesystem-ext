@@ -1,10 +1,10 @@
 {
   "name": "vscode-filesystem-ext",
-  "displayName": "VSCode 文件系统拓展",
-  "description": "优先使用真实 VSCode 终端，为 VSCode 导出 Web 文件管理、Streamable HTTP MCP 与终端执行能力。",
-  "version": "0.0.12",
-  "publisher": "local",
-  "private": true,
+  "displayName": "VS Code MCP 文件与终端桥接",
+  "description": "基于 VS Code 集成终端与语言服务，对外导出文件、搜索、编辑、语义查询与 MCP 能力；不做 shell 风格转译。",
+  "version": "0.0.15",
+  "publisher": "Aurorix",
+  "private": false,
   "license": "PolyForm Noncommercial 1.0.0",
   "repository": {
     "type": "git",
@@ -56,7 +56,7 @@
       }
     ],
     "configuration": {
-      "title": "VSCode 文件系统拓展",
+      "title": "VS Code MCP 文件与终端桥接",
       "properties": {
         "workspaceWebGateway.mcp.host": {
           "type": "string",
@@ -83,7 +83,8 @@
     "test:extension": "node ./test/extension/run.js",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "package": "node esbuild.mjs --production"
+    "package": "node esbuild.mjs --production",
+    "package:vsix": "npx @vscode/vsce package"
   },
   "devDependencies": {
     "@vscode/test-electron": "^2.5.2",
