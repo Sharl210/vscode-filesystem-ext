@@ -15,7 +15,7 @@ describe('accessible roots', () => {
     ]);
   });
 
-  it('returns local roots, explorer roots, and remote host root together', () => {
+  it('treats host roots as remote roots when the extension runs in a remote workspace host', () => {
     const roots = collectAccessibleRoots(
       [
         {
@@ -37,8 +37,8 @@ describe('accessible roots', () => {
     );
 
     expect(roots).toEqual([
-      { name: '本机根目录', uri: 'file:///', source: 'local' },
-      { name: '本机主目录', uri: 'file:///home/demo', source: 'local' },
+      { name: '远程主机根目录 (prod)', uri: 'file:///', source: 'remote' },
+      { name: '远程主机主目录 (prod)', uri: 'file:///home/demo', source: 'remote' },
       {
         name: '工作区 · AT_PARSER',
         uri: 'vscode-remote://ssh-remote+prod/home/user/AT_PARSER',
@@ -48,11 +48,6 @@ describe('accessible roots', () => {
         name: '工作区 · 时间线',
         uri: 'vscode-remote://ssh-remote+prod/home/user/timeline',
         source: 'workspace'
-      },
-      {
-        name: '远程主机根目录 (prod)',
-        uri: 'vscode-remote://ssh-remote+prod/',
-        source: 'remote'
       }
     ]);
   });
@@ -71,7 +66,7 @@ describe('accessible roots', () => {
     );
 
     expect(roots).toEqual([
-      { name: '本机根目录', uri: 'file:///', source: 'local' },
+      { name: '远程主机根目录 (prod)', uri: 'file:///', source: 'remote' },
       { name: '工作区 · 重复项目', uri: 'vscode-remote://ssh-remote+prod/', source: 'workspace' }
     ]);
   });

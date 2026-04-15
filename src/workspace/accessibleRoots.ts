@@ -17,6 +17,9 @@ export function collectAccessibleRoots(
   const platform = options.platform ?? process.platform;
   const homeDir = options.homeDir ?? os.homedir();
   const remoteAuthority = options.remoteAuthority ?? detectRemoteAuthority(workspaceFolders);
+  const hostRootSource: WorkspaceInput['source'] = remoteAuthority ? 'remote' : 'local';
+  const hostRootLabel = remoteAuthority ? `远程主机根目录 (${describeRemoteAuthority(remoteAuthority)})` : '本机根目录';
+  const homeRootLabel = remoteAuthority ? `远程主机主目录 (${describeRemoteAuthority(remoteAuthority)})` : '本机主目录';
   const roots: WorkspaceInput[] = [];
 
   if (platform === 'win32') {
@@ -24,24 +27,24 @@ export function collectAccessibleRoots(
 
     for (const driveRoot of driveRoots) {
       roots.push({
-        name: `本机根目录 (${driveRoot.replace(/\\$/, '')})`,
+        name: remoteAuthority ? `远程主机根目录 (${driveRoot.replace(/\\$/, '')})` : `本机根目录 (${driveRoot.replace(/\\$/, '')})`,
         uri: pathToFileURL(driveRoot).toString(),
-        source: 'local'
+        source: hostRootSource
       });
     }
   } else {
     roots.push({
-      name: '本机根目录',
+      name: hostRootLabel,
       uri: pathToFileURL('/').toString(),
-      source: 'local'
+      source: hostRootSource
     });
   }
 
   if (homeDir) {
     roots.push({
-      name: '本机主目录',
+      name: homeRootLabel,
       uri: pathToFileURL(homeDir).toString(),
-      source: 'local'
+      source: hostRootSource
     });
   }
 
@@ -52,14 +55,6 @@ export function collectAccessibleRoots(
       source: 'workspace' as const
     }))
   );
-
-  if (remoteAuthority) {
-    roots.push({
-      name: `远程主机根目录 (${describeRemoteAuthority(remoteAuthority)})`,
-      uri: `vscode-remote://${remoteAuthority}/`,
-      source: 'remote'
-    });
-  }
 
   return deduplicateByUri(roots);
 }
