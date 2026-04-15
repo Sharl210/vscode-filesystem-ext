@@ -78,6 +78,15 @@ function createRouterForTest() {
           authority: 'ssh-remote+prod-server'
         };
       },
+      getActiveEditor() {
+        return null;
+      },
+      listOpenDocuments() {
+        return { items: [] };
+      },
+      async findFiles() {
+        return [];
+      },
       getWorkspaceById(id: string) {
         if (id === workspace.id) {
           return workspace;
@@ -236,6 +245,15 @@ describe('router', () => {
               remoteName: null,
               authority: null
             };
+          },
+          getActiveEditor() {
+            return null;
+          },
+          listOpenDocuments() {
+            return { items: [] };
+          },
+          async findFiles() {
+            return [];
           },
           getWorkspaceById() {
             return workspace;

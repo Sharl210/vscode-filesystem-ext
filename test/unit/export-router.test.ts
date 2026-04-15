@@ -91,6 +91,15 @@ function createExportRouterForTest() {
           authority: null
         };
       },
+      getActiveEditor() {
+        return null;
+      },
+      listOpenDocuments() {
+        return { items: [] };
+      },
+      async findFiles() {
+        return [];
+      },
       getWorkspaceById(id: string) {
         return id === workspace.id ? workspace : undefined;
       },

@@ -79,6 +79,22 @@ const mocked = vi.hoisted(() => {
   };
   const clipboardWriteText = vi.fn(async () => {});
   const showInformationMessage = vi.fn();
+  const executeCommand = vi.fn(async () => []);
+  const openTextDocument = vi.fn(async () => ({
+    uri: {
+      toString() {
+        return 'file:///workspace/demo/src/app.ts';
+      }
+    },
+    languageId: 'typescript',
+    version: 1,
+    isDirty: false,
+    lineCount: 3,
+    getWordRangeAtPosition: vi.fn((position: { line: number; character: number }) => ({
+      start: { line: position.line, character: position.character },
+      end: { line: position.line, character: position.character + 5 }
+    }))
+  }));
   const extensionConfigurationValues: Record<string, unknown> = {
     'mcp.host': '127.0.0.1',
     'mcp.port': 21080,
@@ -120,6 +136,13 @@ const mocked = vi.hoisted(() => {
     getExecutionOutput: vi.fn(),
     cancelExecution: vi.fn()
   };
+  const language = {
+    getDiagnostics: vi.fn(),
+    getDefinition: vi.fn(),
+    findReferences: vi.fn(),
+    getDocumentSymbols: vi.fn(),
+    getWorkspaceSymbols: vi.fn()
+  };
   const executor = {
     reads: {
       getWorkspaces: vi.fn(() => [executorWorkspace]),
@@ -130,6 +153,7 @@ const mocked = vi.hoisted(() => {
     },
     files: { kind: 'executor-files' },
     exports: { kind: 'executor-exports' },
+    language,
     terminal: { kind: 'executor-terminal' }
   };
   const router = {
@@ -182,6 +206,7 @@ const mocked = vi.hoisted(() => {
     executorWorkspace,
     exportJobs,
     fileService,
+    language,
     getConfiguration: vi.fn(() => ({
       get: vi.fn((key: string, fallbackValue?: unknown) =>
         key in extensionConfigurationValues ? extensionConfigurationValues[key] : fallbackValue
@@ -197,6 +222,8 @@ const mocked = vi.hoisted(() => {
     resolveConnectionInfo: vi.fn(() => localConnectionInfo),
     resolveWorkspacePath: vi.fn(() => 'resolved-directly'),
     mcpRouter,
+    openTextDocument,
+    executeCommand,
     router,
     staticAsset,
     staticAssets,
@@ -211,7 +238,8 @@ const mocked = vi.hoisted(() => {
 
 vi.mock('vscode', () => ({
   commands: {
-    registerCommand: mocked.registerCommand
+    registerCommand: mocked.registerCommand,
+    executeCommand: mocked.executeCommand
   },
   env: {
     asExternalUri: vi.fn(async (uri: { toString(): string }) => uri),
@@ -230,6 +258,7 @@ vi.mock('vscode', () => ({
   workspace: {
     workspaceFolders: [],
     getConfiguration: mocked.getConfiguration,
+    openTextDocument: mocked.openTextDocument,
     fs: {
       readDirectory: vi.fn(),
       readFile: vi.fn(),
@@ -243,6 +272,28 @@ vi.mock('vscode', () => ({
   },
   StatusBarAlignment: {
     Right: 2
+  },
+  Position: class Position {
+    line: number;
+    character: number;
+    constructor(line: number, character: number) {
+      this.line = line;
+      this.character = character;
+    }
+  },
+  Range: class Range {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+    constructor(start: { line: number; character: number }, end: { line: number; character: number }) {
+      this.start = start;
+      this.end = end;
+    }
+  },
+  MarkdownString: class MarkdownString {
+    value: string;
+    constructor(value: string) {
+      this.value = value;
+    }
   },
   Uri: {
     parse(value: string) {
@@ -330,6 +381,24 @@ describe('gateway command composition', () => {
     mocked.statusBarItem.text = '';
     mocked.statusBarItem.tooltip = '';
     mocked.statusBarItem.command = '';
+    mocked.executeCommand.mockReset();
+    mocked.executeCommand.mockResolvedValue([]);
+    mocked.openTextDocument.mockReset();
+    mocked.openTextDocument.mockResolvedValue({
+      uri: {
+        toString() {
+          return 'file:///workspace/demo/src/app.ts';
+        }
+      },
+      languageId: 'typescript',
+      version: 1,
+      isDirty: false,
+      lineCount: 3,
+      getWordRangeAtPosition: vi.fn((position: { line: number; character: number }) => ({
+        start: { line: position.line, character: position.character },
+        end: { line: position.line, character: position.character + 5 }
+      }))
+    });
   });
 
   it('builds router dependencies from executor ports while keeping host-only concerns local', async () => {
@@ -363,6 +432,13 @@ describe('gateway command composition', () => {
       expect.objectContaining({
         fileService: mocked.fileService,
         exportJobs: mocked.exportJobs,
+        language: expect.objectContaining({
+          getDiagnostics: expect.any(Function),
+          getDefinition: expect.any(Function),
+          findReferences: expect.any(Function),
+          getDocumentSymbols: expect.any(Function),
+          getWorkspaceSymbols: expect.any(Function)
+        }),
         terminal: mocked.terminalManager,
         reads: expect.objectContaining({
           getWorkspaces: expect.any(Function),
@@ -437,5 +513,58 @@ describe('gateway command composition', () => {
     expect(mocked.clipboardWriteText).toHaveBeenCalledTimes(1);
     expect(mocked.clipboardWriteText).toHaveBeenCalledWith('http://127.0.0.1:21080/mcp');
     expect(mocked.showInformationMessage).toHaveBeenCalledWith('MCP HTTP 入口已就绪并复制：http://127.0.0.1:21080/mcp');
+  });
+
+  it('opens documents before language provider calls and uses a non-empty range for code actions', async () => {
+    const { registerGatewayCommands } = await import('../../src/commands.js');
+
+    registerGatewayCommands({
+      extensionPath: '/tmp/workspace-web-gateway',
+      globalState: {}
+    } as never);
+
+    await Promise.resolve();
+
+    const executorCall = mocked.createLocalGatewayExecutor.mock.calls[0] as unknown as [unknown] | undefined;
+    const localExecutorDeps = executorCall?.[0] as {
+      language: {
+        getDefinition(input: { uri: string; line: number; character: number }): Promise<unknown>;
+        getCodeActions(input: { uri: string; line: number; character: number }): Promise<unknown>;
+      };
+    } | undefined;
+
+    if (!localExecutorDeps) {
+      throw new Error('local executor dependencies were not captured');
+    }
+
+    await localExecutorDeps.language.getDefinition({
+      uri: 'file:///workspace/demo/src/app.ts',
+      line: 1,
+      character: 17
+    });
+
+    await localExecutorDeps.language.getCodeActions({
+      uri: 'file:///workspace/demo/src/app.ts',
+      line: 1,
+      character: 17
+    });
+
+    expect(mocked.openTextDocument).toHaveBeenNthCalledWith(1, expect.objectContaining({ toString: expect.any(Function) }), undefined);
+    expect(mocked.openTextDocument).toHaveBeenNthCalledWith(2, expect.objectContaining({ toString: expect.any(Function) }), undefined);
+    expect(mocked.executeCommand).toHaveBeenNthCalledWith(
+      1,
+      'vscode.executeDefinitionProvider',
+      expect.objectContaining({ toString: expect.any(Function) }),
+      expect.objectContaining({ line: 0, character: 17 })
+    );
+    expect(mocked.executeCommand).toHaveBeenNthCalledWith(
+      2,
+      'vscode.executeCodeActionProvider',
+      expect.objectContaining({ toString: expect.any(Function) }),
+      expect.objectContaining({
+        start: { line: 0, character: 17 },
+        end: { line: 0, character: 22 }
+      })
+    );
   });
 });
