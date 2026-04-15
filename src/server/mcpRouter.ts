@@ -33,7 +33,7 @@ interface JsonRpcResponseError {
 }
 
 interface McpRouterDependencies {
-  executor: Pick<GatewayExecutor, 'reads' | 'files' | 'exports' | 'terminal'>;
+  executor: Pick<GatewayExecutor, 'reads' | 'files' | 'exports' | 'language' | 'terminal'>;
   path?: string;
 }
 
@@ -90,7 +90,7 @@ const TIMEOUT_MS_PROPERTY = {
 const TERMINAL_MODE_PROPERTY = {
   type: 'string',
   enum: ['auto', 'compatibility'],
-  description: '可选终端模式。auto 为默认值，优先尝试 VS Code 终端；compatibility 表示直接使用系统终端。'
+  description: '可选终端模式。auto 为默认值，优先尝试 VS Code 自带终端；compatibility 表示直接使用系统终端。实际 shell 风格完全跟随 VS Code 当前终端配置，不承诺 bash、Linux 或 Windows 风格。'
 };
 
 const SHELL_WAIT_PROPERTY = {
@@ -135,6 +135,135 @@ const IMAGE_DATA_URL_PROPERTY = {
   description: '伪装图片 Data URL。仅 export_disguised_image 需要。'
 };
 
+const GLOB_PATTERN_PROPERTY = {
+  type: 'string',
+  description: 'glob 模式，例如 **/*.ts、src/**/*.json、README.md。'
+};
+
+const SEARCH_QUERY_PROPERTY = {
+  type: 'string',
+  description: '要搜索的文本或正则表达式。空字符串无效。'
+};
+
+const SEARCH_REGEX_PROPERTY = {
+  type: 'boolean',
+  description: '是否把 query 当作正则表达式处理。默认 false。'
+};
+
+const SEARCH_CASE_SENSITIVE_PROPERTY = {
+  type: 'boolean',
+  description: '是否区分大小写。默认 false。'
+};
+
+const JSON_QUERY_PROPERTY = {
+  type: 'string',
+  description: '可选 JSON 路径，例如 compilerOptions.strict 或 targets.0。留空表示返回整个 JSON。'
+};
+
+const JSON_PRETTY_PROPERTY = {
+  type: 'boolean',
+  description: '是否返回格式化后的 json 文本。默认 true。'
+};
+
+const EDITS_ARRAY_PROPERTY = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      oldText: {
+        type: 'string',
+        description: '要匹配的原始文本片段。'
+      },
+      newText: {
+        type: 'string',
+        description: '替换后的文本片段。'
+      },
+      replaceAll: {
+        type: 'boolean',
+        description: '是否替换全部匹配。默认 false，仅替换第一处。'
+      }
+    },
+    required: ['oldText', 'newText'],
+    additionalProperties: false
+  },
+  description: '要按顺序应用的文本编辑列表。每一项都基于前一项应用后的最新内容。'
+};
+
+const READ_OFFSET_PROPERTY = {
+  type: 'number',
+  description: '可选起始行号，从 1 开始。适合只读取文件中的局部片段。'
+};
+
+const READ_LIMIT_PROPERTY = {
+  type: 'number',
+  description: '可选最大返回行数。适合大文件分段读取。'
+};
+
+const READ_WITH_LINE_NUMBERS_PROPERTY = {
+  type: 'boolean',
+  description: '可选是否给返回内容加行号前缀，便于模型定位和引用。'
+};
+
+const COLLECTION_OFFSET_PROPERTY = {
+  type: 'number',
+  description: '可选起始序号，从 1 开始。适合分页读取列表或搜索结果。'
+};
+
+const COLLECTION_LIMIT_PROPERTY = {
+  type: 'number',
+  description: '可选最大返回条目数。适合分页读取列表或搜索结果。'
+};
+
+const BINARY_OFFSET_PROPERTY = {
+  type: 'number',
+  description: '可选起始字节序号，从 1 开始。适合大二进制文件分段读取。'
+};
+
+const BINARY_LIMIT_PROPERTY = {
+  type: 'number',
+  description: '可选最大返回字节数。适合大二进制文件分段读取。'
+};
+
+const LINE_PROPERTY = {
+  type: 'number',
+  description: '目标行号，从 1 开始。'
+};
+
+const CHARACTER_PROPERTY = {
+  type: 'number',
+  description: '目标列号，从 0 开始。'
+};
+
+const SYMBOL_QUERY_PROPERTY = {
+  type: 'string',
+  description: '工作区符号查询文本，例如 hello、useEffect、App。'
+};
+
+const NEW_NAME_PROPERTY = {
+  type: 'string',
+  description: '新的符号名或标识符名。'
+};
+
+const CONTEXT_LINES_PROPERTY = {
+  type: 'number',
+  description: '命中前后各保留多少行上下文。默认 1。'
+};
+
+const PATH_PATTERN_PROPERTY = {
+  type: 'string',
+  description: '可选路径过滤 glob，例如 src/**/*.ts 或 **/*.json。'
+};
+
+const MAX_DEPTH_PROPERTY = {
+  type: 'number',
+  description: '目录树最大深度，1 表示只看当前层。默认 3。'
+};
+
+const PATCH_PROPERTY = {
+  type: 'string',
+  description: '补丁文本，采用 *** Begin Patch / *** Update File 等文件级补丁格式。'
+};
+
 const PARAM_SUMMARY_BY_KEY: Record<string, string> = {
   workspaceId: '先用 list_workspaces 获取',
   fromWorkspaceId: '源工作区 ID',
@@ -151,6 +280,22 @@ const PARAM_SUMMARY_BY_KEY: Record<string, string> = {
   tabId: '终端 Tab ID',
   command: '终端命令',
   cwdPath: '相对 cwd 路径',
+  offset: '从第几行开始，1 起始',
+  limit: '最多返回多少行',
+  withLineNumbers: '是否给内容加行号',
+  pattern: 'glob 模式',
+  query: '搜索文本或 JSON 路径',
+  isRegex: '是否按正则搜索',
+  caseSensitive: '是否区分大小写',
+  pretty: '是否返回格式化 JSON',
+  edits: '文本编辑数组',
+  line: '目标行号，1 起始',
+  character: '目标列号，0 起始',
+  newName: '新的符号名',
+  contextLines: '命中前后上下文行数',
+  pathPattern: '路径过滤 glob',
+  maxDepth: '目录树最大深度',
+  patch: '补丁文本',
   timeoutMs: '默认 120000',
   mode: '默认 auto',
   shellIntegrationWaitMs: '默认 30000，可提到 60000',
@@ -171,6 +316,24 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   renameEntry: 'rename_entry',
   copyEntry: 'copy_entry',
   moveEntry: 'move_entry',
+  findFiles: 'find_files',
+  searchText: 'search_text',
+  readJsonFile: 'read_json_file',
+  applyTextEdits: 'apply_text_edits',
+  getDiagnostics: 'get_diagnostics',
+  getDefinition: 'get_definition',
+  findReferences: 'find_references',
+  getDocumentSymbols: 'get_document_symbols',
+  getWorkspaceSymbols: 'get_workspace_symbols',
+  getHover: 'get_hover',
+  getCodeActions: 'get_code_actions',
+  prepareRename: 'prepare_rename',
+  getRenameEdits: 'get_rename_edits',
+  getActiveEditor: 'get_active_editor',
+  listOpenDocuments: 'list_open_documents',
+  getFormatEdits: 'get_format_edits',
+  directoryTree: 'directory_tree',
+  applyPatch: 'apply_patch',
   exportArchive: 'export_archive',
   exportDisguisedImage: 'export_disguised_image',
   startExportJob: 'start_export_job',
@@ -193,19 +356,29 @@ const MCP_TOOLS: McpToolDefinition[] = [
   defineTool('listWorkspaces', 'list_workspaces 的 camelCase 别名。', {}),
   defineTool('list_directory', '列出目录内容。适合先探路，再决定读取、写入或导出。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
-    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
   }, ['workspaceId']),
   defineTool('listDirectory', 'list_directory 的 camelCase 别名。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
-    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
   }, ['workspaceId']),
   defineTool('read_text_file', '读取文本文件内容。必填 workspaceId 和 path。若路径不存在或越界会失败。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
-    path: RELATIVE_PATH_PROPERTY
+    path: RELATIVE_PATH_PROPERTY,
+    offset: READ_OFFSET_PROPERTY,
+    limit: READ_LIMIT_PROPERTY,
+    withLineNumbers: READ_WITH_LINE_NUMBERS_PROPERTY
   }, ['workspaceId', 'path']),
   defineTool('readTextFile', 'read_text_file 的 camelCase 别名。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
-    path: RELATIVE_PATH_PROPERTY
+    path: RELATIVE_PATH_PROPERTY,
+    offset: READ_OFFSET_PROPERTY,
+    limit: READ_LIMIT_PROPERTY,
+    withLineNumbers: READ_WITH_LINE_NUMBERS_PROPERTY
   }, ['workspaceId', 'path']),
   defineTool('write_text_file', '写入文本文件。必填 workspaceId、path、content。常见错误是 path 越界或 content 不是字符串。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
@@ -219,11 +392,15 @@ const MCP_TOOLS: McpToolDefinition[] = [
   }, ['workspaceId', 'path', 'content']),
   defineTool('read_binary_file', '读取文件原始字节并返回 Base64。适合图片、压缩包等二进制文件。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
-    path: RELATIVE_PATH_PROPERTY
+    path: RELATIVE_PATH_PROPERTY,
+    offset: BINARY_OFFSET_PROPERTY,
+    limit: BINARY_LIMIT_PROPERTY
   }, ['workspaceId', 'path']),
   defineTool('readBinaryFile', 'read_binary_file 的 camelCase 别名。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
-    path: RELATIVE_PATH_PROPERTY
+    path: RELATIVE_PATH_PROPERTY,
+    offset: BINARY_OFFSET_PROPERTY,
+    limit: BINARY_LIMIT_PROPERTY
   }, ['workspaceId', 'path']),
   defineTool('write_binary_file', '按 Base64 写入二进制文件。必填 workspaceId、path、contentBase64。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
@@ -293,6 +470,194 @@ const MCP_TOOLS: McpToolDefinition[] = [
     toWorkspaceId: WORKSPACE_ID_PROPERTY,
     toPath: RELATIVE_PATH_PROPERTY
   }, ['fromWorkspaceId', 'fromPath', 'toWorkspaceId', 'toPath']),
+  defineTool('find_files', '按 glob 模式递归查找文件或目录，适合替代 find、glob 和简单 tree 探查。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    pattern: GLOB_PATTERN_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
+  }, ['workspaceId', 'pattern']),
+  defineTool('findFiles', 'find_files 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    pattern: GLOB_PATTERN_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
+  }, ['workspaceId', 'pattern']),
+  defineTool('search_text', '递归搜索文本内容，适合替代 grep 或 rg。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    pathPattern: PATH_PATTERN_PROPERTY,
+    query: SEARCH_QUERY_PROPERTY,
+    isRegex: SEARCH_REGEX_PROPERTY,
+    caseSensitive: SEARCH_CASE_SENSITIVE_PROPERTY,
+    contextLines: CONTEXT_LINES_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
+  }, ['workspaceId', 'query']),
+  defineTool('searchText', 'search_text 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    pathPattern: PATH_PATTERN_PROPERTY,
+    query: SEARCH_QUERY_PROPERTY,
+    isRegex: SEARCH_REGEX_PROPERTY,
+    caseSensitive: SEARCH_CASE_SENSITIVE_PROPERTY,
+    contextLines: CONTEXT_LINES_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
+  }, ['workspaceId', 'query']),
+  defineTool('read_json_file', '读取并解析 JSON 文件，可按路径提取局部值，适合替代 jq 的常见查看场景。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    query: JSON_QUERY_PROPERTY,
+    pretty: JSON_PRETTY_PROPERTY
+  }, ['workspaceId', 'path']),
+  defineTool('readJsonFile', 'read_json_file 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    query: JSON_QUERY_PROPERTY,
+    pretty: JSON_PRETTY_PROPERTY
+  }, ['workspaceId', 'path']),
+  defineTool('apply_text_edits', '按顺序对文件应用结构化文本编辑，适合替代 patch、sed 或简单脚本式替换。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    edits: EDITS_ARRAY_PROPERTY
+  }, ['workspaceId', 'path', 'edits']),
+  defineTool('applyTextEdits', 'apply_text_edits 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    edits: EDITS_ARRAY_PROPERTY
+  }, ['workspaceId', 'path', 'edits']),
+  defineTool('get_diagnostics', '读取文件或工作区的语言诊断结果，适合替代编辑器里的 Problems 视图。结果依赖 VS Code 当前已激活的语言能力，可能为空。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY
+  }, []),
+  defineTool('getDiagnostics', 'get_diagnostics 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY
+  }, []),
+  defineTool('get_definition', '查询指定位置的定义跳转结果。结果依赖 VS Code 当前已激活的语言能力，可能为空。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('getDefinition', 'get_definition 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('find_references', '查询指定位置的引用结果。结果依赖 VS Code 当前已激活的语言能力，可能为空。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('findReferences', 'find_references 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('get_document_symbols', '列出单个文件内的文档符号。结果依赖 VS Code 当前已激活的语言能力，可能为空。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY
+  }, ['workspaceId', 'path']),
+  defineTool('getDocumentSymbols', 'get_document_symbols 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY
+  }, ['workspaceId', 'path']),
+  defineTool('get_workspace_symbols', '按查询文本列出工作区符号。结果依赖 VS Code 当前已激活的语言能力，可能为空。', {
+    query: SYMBOL_QUERY_PROPERTY
+  }, ['query']),
+  defineTool('getWorkspaceSymbols', 'get_workspace_symbols 的 camelCase 别名。', {
+    query: SYMBOL_QUERY_PROPERTY
+  }, ['query']),
+  defineTool('get_hover', '查询指定位置的 hover 信息。结果依赖 VS Code 当前已激活的语言能力，可能只返回范围或空内容。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('getHover', 'get_hover 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('get_code_actions', '查询指定位置的 code actions。结果依赖 VS Code 当前已激活的语言能力，可能为空。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('getCodeActions', 'get_code_actions 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('prepare_rename', '检查当前位置是否可重命名，并返回占位符和目标范围。结果依赖 VS Code 当前已激活的语言能力。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('prepareRename', 'prepare_rename 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character']),
+  defineTool('get_rename_edits', '获取语义重命名后的编辑集合，但不直接写回文件。结果依赖 VS Code 当前已激活的语言能力，可能为空。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY,
+    newName: NEW_NAME_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character', 'newName']),
+  defineTool('getRenameEdits', 'get_rename_edits 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY,
+    line: LINE_PROPERTY,
+    character: CHARACTER_PROPERTY,
+    newName: NEW_NAME_PROPERTY
+  }, ['workspaceId', 'path', 'line', 'character', 'newName']),
+  defineTool('get_active_editor', '读取当前激活编辑器的路径、语言、选区和版本信息。', {}, []),
+  defineTool('getActiveEditor', 'get_active_editor 的 camelCase 别名。', {}, []),
+  defineTool('list_open_documents', '列出当前已打开文档及其基础状态。', {}, []),
+  defineTool('listOpenDocuments', 'list_open_documents 的 camelCase 别名。', {}, []),
+  defineTool('get_format_edits', '获取文档格式化建议的编辑集合，但不直接写回文件。结果依赖 VS Code 当前已激活的 formatter，可能为空。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY
+  }, ['workspaceId', 'path']),
+  defineTool('getFormatEdits', 'get_format_edits 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: RELATIVE_PATH_PROPERTY
+  }, ['workspaceId', 'path']),
+  defineTool('directory_tree', '递归返回目录树文本，适合替代 tree 命令做结构探查。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    maxDepth: MAX_DEPTH_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
+  }, ['workspaceId']),
+  defineTool('directoryTree', 'directory_tree 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    path: OPTIONAL_RELATIVE_DIRECTORY_PROPERTY,
+    maxDepth: MAX_DEPTH_PROPERTY,
+    offset: COLLECTION_OFFSET_PROPERTY,
+    limit: COLLECTION_LIMIT_PROPERTY
+  }, ['workspaceId']),
+  defineTool('apply_patch', '应用文件级补丁文本，适合替代简单 patch 工作流。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    patch: PATCH_PROPERTY
+  }, ['workspaceId', 'patch']),
+  defineTool('applyPatch', 'apply_patch 的 camelCase 别名。', {
+    workspaceId: WORKSPACE_ID_PROPERTY,
+    patch: PATCH_PROPERTY
+  }, ['workspaceId', 'patch']),
   defineTool('export_archive', '把路径数组导出为 tar 归档并返回 Base64。必填 workspaceId 和非空 paths。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
     paths: PATHS_ARRAY_PROPERTY
@@ -340,7 +705,7 @@ const MCP_TOOLS: McpToolDefinition[] = [
   defineTool('showTerminalTabContent', 'show_terminal_tab_content 的 camelCase 别名。', {
     tabId: TAB_ID_PROPERTY
   }, ['tabId']),
-  defineTool('terminal_execute', '同步执行终端命令并等待结果。必填 command；可选 tabId、workspaceId、cwdPath、timeoutMs、mode、shellIntegrationWaitMs。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。在 vscode-terminal 模式下 exitCode 可能为 null。', {
+  defineTool('terminal_execute', '同步执行终端命令并等待结果。必填 command；可选 tabId、workspaceId、cwdPath、timeoutMs、mode、shellIntegrationWaitMs。这里使用的是 VS Code 自带终端，不做任何 shell 转译或风格统一；实际命令语义取决于 VS Code 当前终端配置。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。在 vscode-terminal 模式下 exitCode 可能为 null。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
     command: COMMAND_PROPERTY,
     tabId: TAB_ID_PROPERTY,
@@ -358,7 +723,7 @@ const MCP_TOOLS: McpToolDefinition[] = [
     mode: TERMINAL_MODE_PROPERTY,
     shellIntegrationWaitMs: SHELL_WAIT_PROPERTY
   }, ['command']),
-  defineTool('start_terminal_execution', '启动后台终端任务，立即返回 executionId。后续配合 get_terminal_execution 与 get_terminal_execution_output。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。在 vscode-terminal 模式下最终 exitCode 可能为 null。', {
+  defineTool('start_terminal_execution', '启动后台终端任务，立即返回 executionId。后续配合 get_terminal_execution 与 get_terminal_execution_output。这里使用的是 VS Code 自带终端，不做任何 shell 转译或风格统一；实际命令语义取决于 VS Code 当前终端配置。timeoutMs 默认 120 秒；shellIntegrationWaitMs 默认 30000。在 vscode-terminal 模式下最终 exitCode 可能为 null。', {
     workspaceId: WORKSPACE_ID_PROPERTY,
     command: COMMAND_PROPERTY,
     tabId: TAB_ID_PROPERTY,
@@ -610,7 +975,7 @@ async function handleMethod(request: JsonRpcRequest, dependencies: McpRouterDepe
       },
       serverInfo: {
         name: MCP_SERVER_NAME,
-        version: '0.0.12'
+        version: '0.0.13'
       }
     };
   }
@@ -663,7 +1028,7 @@ async function handleToolCall(
   toolArguments: Record<string, unknown>,
   dependencies: McpRouterDependencies
 ): Promise<unknown> {
-  const { reads, files, exports, terminal } = dependencies.executor;
+  const { reads, files, exports, language, terminal } = dependencies.executor;
 
   if (toolName === 'list_workspaces') {
     return {
@@ -677,10 +1042,16 @@ async function handleToolCall(
     const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
     const path = getOptionalString(toolArguments, 'path');
     const directoryUri = resolveWorkspacePath(reads, workspace.uri, path);
+    const items = await files.listDirectory(directoryUri, path);
+    const paged = paginateCollection(items, getOptionalPositiveInteger(toolArguments, 'offset'), getOptionalPositiveInteger(toolArguments, 'limit'));
     return {
       workspace,
       path,
-      items: await files.listDirectory(directoryUri, path)
+      items: paged.items,
+      offset: paged.offset,
+      limit: paged.limit,
+      totalItems: paged.totalItems,
+      truncated: paged.truncated
     };
   }
 
@@ -688,7 +1059,11 @@ async function handleToolCall(
     const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
     const path = getRequiredString(toolArguments, 'path');
     const fileUri = resolveWorkspacePath(reads, workspace.uri, path);
-    return files.readTextFile(fileUri, path);
+    return files.readTextFile(fileUri, path, {
+      offset: getOptionalPositiveInteger(toolArguments, 'offset'),
+      limit: getOptionalPositiveInteger(toolArguments, 'limit'),
+      withLineNumbers: getOptionalBoolean(toolArguments, 'withLineNumbers') !== false
+    });
   }
 
   if (toolName === 'write_text_file') {
@@ -709,7 +1084,18 @@ async function handleToolCall(
     const path = getRequiredString(toolArguments, 'path');
     const fileUri = resolveWorkspacePath(reads, workspace.uri, path);
     const payload = await files.readBinaryFile(fileUri, path);
-    return encodeBinaryPayload(payload);
+    const paged = paginateBinaryPayload(payload.data, getOptionalPositiveInteger(toolArguments, 'offset'), getOptionalPositiveInteger(toolArguments, 'limit'));
+    return {
+      ...encodeBinaryPayload({
+        data: paged.data,
+        mimeType: payload.mimeType,
+        fileName: payload.fileName
+      }),
+      offset: paged.offset,
+      limit: paged.limit,
+      totalBytes: paged.totalBytes,
+      truncated: paged.truncated
+    };
   }
 
   if (toolName === 'write_binary_file') {
@@ -804,6 +1190,187 @@ async function handleToolCall(
       fromPath,
       toPath
     };
+  }
+
+  if (toolName === 'find_files') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getOptionalString(toolArguments, 'path');
+    const pattern = getRequiredString(toolArguments, 'pattern');
+    const offset = getOptionalPositiveInteger(toolArguments, 'offset');
+    const limit = getOptionalPositiveInteger(toolArguments, 'limit');
+    return findFilesInWorkspace(reads, files, workspace.uri, path, pattern, offset, limit);
+  }
+
+  if (toolName === 'search_text') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getOptionalString(toolArguments, 'path');
+    const query = getRequiredString(toolArguments, 'query');
+    const offset = getOptionalPositiveInteger(toolArguments, 'offset');
+    const limit = getOptionalPositiveInteger(toolArguments, 'limit');
+    return searchTextInWorkspace(reads, files, workspace.uri, {
+      path,
+      query,
+      isRegex: getOptionalBoolean(toolArguments, 'isRegex') === true,
+      caseSensitive: getOptionalBoolean(toolArguments, 'caseSensitive') === true,
+      pathPattern: getOptionalStringOrUndefined(toolArguments, 'pathPattern'),
+      contextLines: getOptionalNonNegativeInteger(toolArguments, 'contextLines') ?? 1,
+      offset,
+      limit
+    });
+  }
+
+  if (toolName === 'directory_tree') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getOptionalString(toolArguments, 'path');
+    return buildDirectoryTree(reads, files, workspace.uri, {
+      path,
+      maxDepth: getOptionalPositiveInteger(toolArguments, 'maxDepth') ?? 3,
+      offset: getOptionalPositiveInteger(toolArguments, 'offset'),
+      limit: getOptionalPositiveInteger(toolArguments, 'limit')
+    });
+  }
+
+  if (toolName === 'read_json_file') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    const query = getOptionalStringOrUndefined(toolArguments, 'query');
+    const pretty = getOptionalBoolean(toolArguments, 'pretty') !== false;
+    const fileUri = resolveWorkspacePath(reads, workspace.uri, path);
+    const file = await files.readTextFile(fileUri, path);
+    const jsonValue = parseJsonTextFile(file.content ?? '', path);
+    const selectedValue = query ? resolveJsonPath(jsonValue, query) : jsonValue;
+    const content = formatContentWithLineNumbers(JSON.stringify(selectedValue, null, 2));
+    return {
+      path,
+      query: query ?? null,
+      value: selectedValue,
+      content: pretty ? content : undefined
+    };
+  }
+
+  if (toolName === 'apply_text_edits') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    const edits = getRequiredTextEdits(toolArguments, 'edits');
+    const fileUri = resolveWorkspacePath(reads, workspace.uri, path);
+    const file = await files.readTextFile(fileUri, path);
+    const originalContent = file.content ?? '';
+    const applied = applyTextEdits(originalContent, edits);
+    await files.writeTextFile(fileUri, applied.content);
+    return {
+      saved: true,
+      path,
+      appliedEdits: applied.appliedEdits
+    };
+  }
+
+  if (toolName === 'get_diagnostics') {
+    const workspaceId = getOptionalStringOrUndefined(toolArguments, 'workspaceId');
+    const path = getOptionalStringOrUndefined(toolArguments, 'path');
+    if (!workspaceId || !path) {
+      return language.getDiagnostics({});
+    }
+
+    const workspace = resolveWorkspace(reads, workspaceId);
+    const uri = resolveWorkspacePath(reads, workspace.uri, path);
+    return language.getDiagnostics({ uri });
+  }
+
+  if (toolName === 'get_definition') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.getDefinition({
+      uri: resolveWorkspacePath(reads, workspace.uri, path),
+      line: getRequiredPositiveInteger(toolArguments, 'line'),
+      character: getRequiredNonNegativeInteger(toolArguments, 'character')
+    });
+  }
+
+  if (toolName === 'find_references') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.findReferences({
+      uri: resolveWorkspacePath(reads, workspace.uri, path),
+      line: getRequiredPositiveInteger(toolArguments, 'line'),
+      character: getRequiredNonNegativeInteger(toolArguments, 'character')
+    });
+  }
+
+  if (toolName === 'get_document_symbols') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.getDocumentSymbols({
+      uri: resolveWorkspacePath(reads, workspace.uri, path)
+    });
+  }
+
+  if (toolName === 'get_workspace_symbols') {
+    return language.getWorkspaceSymbols({
+      query: getRequiredString(toolArguments, 'query')
+    });
+  }
+
+  if (toolName === 'get_hover') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.getHover({
+      uri: resolveWorkspacePath(reads, workspace.uri, path),
+      line: getRequiredPositiveInteger(toolArguments, 'line'),
+      character: getRequiredNonNegativeInteger(toolArguments, 'character')
+    });
+  }
+
+  if (toolName === 'get_code_actions') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.getCodeActions({
+      uri: resolveWorkspacePath(reads, workspace.uri, path),
+      line: getRequiredPositiveInteger(toolArguments, 'line'),
+      character: getRequiredNonNegativeInteger(toolArguments, 'character')
+    });
+  }
+
+  if (toolName === 'prepare_rename') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.prepareRename({
+      uri: resolveWorkspacePath(reads, workspace.uri, path),
+      line: getRequiredPositiveInteger(toolArguments, 'line'),
+      character: getRequiredNonNegativeInteger(toolArguments, 'character')
+    });
+  }
+
+  if (toolName === 'get_rename_edits') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.getRenameEdits({
+      uri: resolveWorkspacePath(reads, workspace.uri, path),
+      line: getRequiredPositiveInteger(toolArguments, 'line'),
+      character: getRequiredNonNegativeInteger(toolArguments, 'character'),
+      newName: getRequiredString(toolArguments, 'newName')
+    });
+  }
+
+  if (toolName === 'get_active_editor') {
+    return reads.getActiveEditor();
+  }
+
+  if (toolName === 'list_open_documents') {
+    return reads.listOpenDocuments();
+  }
+
+  if (toolName === 'get_format_edits') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const path = getRequiredString(toolArguments, 'path');
+    return language.getFormatEdits({
+      uri: resolveWorkspacePath(reads, workspace.uri, path)
+    });
+  }
+
+  if (toolName === 'apply_patch') {
+    const workspace = resolveWorkspace(reads, getRequiredString(toolArguments, 'workspaceId'));
+    const patch = getRequiredString(toolArguments, 'patch');
+    return applyPatchText(reads, files, workspace.uri, patch);
   }
 
   if (toolName === 'export_archive' || toolName === 'export_disguised_image') {
@@ -1061,6 +1628,62 @@ function getOptionalNumber(payload: Record<string, unknown>, key: string): numbe
   return value;
 }
 
+function getOptionalPositiveInteger(payload: Record<string, unknown>, key: string): number | undefined {
+  const value = getOptionalNumber(payload, key);
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = Math.trunc(value);
+  if (normalized <= 0) {
+    throw new McpInvalidParamsError(`Invalid parameter: ${key} must be a positive integer`);
+  }
+
+  return normalized;
+}
+
+function getRequiredPositiveInteger(payload: Record<string, unknown>, key: string) {
+  const value = getOptionalPositiveInteger(payload, key);
+  if (value === undefined) {
+    throw new McpInvalidParamsError(`Invalid or missing parameter: ${key}`);
+  }
+
+  return value;
+}
+
+function getRequiredNonNegativeInteger(payload: Record<string, unknown>, key: string) {
+  const value = getOptionalNumber(payload, key);
+  if (value === undefined) {
+    throw new McpInvalidParamsError(`Invalid or missing parameter: ${key}`);
+  }
+
+  const normalized = Math.trunc(value);
+  if (normalized < 0) {
+    throw new McpInvalidParamsError(`Invalid parameter: ${key} must be a non-negative integer`);
+  }
+
+  return normalized;
+}
+
+function getOptionalNonNegativeInteger(payload: Record<string, unknown>, key: string) {
+  const value = getOptionalNumber(payload, key);
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = Math.trunc(value);
+  if (normalized < 0) {
+    throw new McpInvalidParamsError(`Invalid parameter: ${key} must be a non-negative integer`);
+  }
+
+  return normalized;
+}
+
+function getOptionalBoolean(payload: Record<string, unknown>, key: string): boolean | undefined {
+  const value = payload[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 function getOptionalMode(payload: Record<string, unknown>): 'auto' | 'compatibility' | undefined {
   const value = payload.mode;
   return value === 'auto' || value === 'compatibility' ? value : undefined;
@@ -1082,6 +1705,419 @@ function getRequiredFormat(payload: Record<string, unknown>, key: string): Expor
   }
 
   return value;
+}
+
+function getRequiredTextEdits(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new McpInvalidParamsError(`Invalid or missing parameter: ${key}`);
+  }
+
+  return value.map((item) => {
+    const edit = asRecord(item);
+    return {
+      oldText: getRequiredString(edit, 'oldText'),
+      newText: typeof edit.newText === 'string' ? edit.newText : '',
+      replaceAll: getOptionalBoolean(edit, 'replaceAll') === true
+    };
+  });
+}
+
+async function findFilesInWorkspace(
+  reads: Pick<GatewayExecutor['reads'], 'findFiles'>,
+  _files: Pick<GatewayExecutor['files'], 'listDirectory'>,
+  workspaceUri: string,
+  basePath: string,
+  pattern: string,
+  offset: number | undefined,
+  limit: number | undefined
+) {
+  const matches = await reads.findFiles({
+    workspaceUri,
+    includePattern: combineGlob(basePath, pattern)
+  });
+  const paged = paginateCollection(matches, offset, limit);
+  return {
+    basePath,
+    pattern,
+    matches: paged.items,
+    offset: paged.offset,
+    limit: paged.limit,
+    totalMatches: paged.totalItems,
+    truncated: paged.truncated
+  };
+}
+
+async function searchTextInWorkspace(
+  reads: Pick<GatewayExecutor['reads'], 'findFiles' | 'resolveWorkspacePath'>,
+  files: Pick<GatewayExecutor['files'], 'readTextFile'>,
+  workspaceUri: string,
+  options: {
+    path: string;
+    query: string;
+    isRegex: boolean;
+    caseSensitive: boolean;
+    pathPattern?: string;
+    contextLines: number;
+    offset?: number;
+    limit?: number;
+  }
+) {
+  const fileEntries = await reads.findFiles({
+    workspaceUri,
+    includePattern: combineGlob(options.path, options.pathPattern ?? '**/*')
+  });
+  const matches: Array<{ path: string; lineNumber: number; lineText: string; columnNumber: number; context: string }> = [];
+  const regex = options.isRegex
+    ? new RegExp(options.query, options.caseSensitive ? 'g' : 'gi')
+    : null;
+  const literalNeedle = options.caseSensitive ? options.query : options.query.toLowerCase();
+
+  for (const entry of fileEntries) {
+    const fileUri = resolveWorkspacePath(reads, workspaceUri, entry.path);
+    const file = await files.readTextFile(fileUri, entry.path, { withLineNumbers: false });
+    if (!file.file.isText || typeof file.content !== 'string' || file.content.length === 0) {
+      continue;
+    }
+
+    const lines = file.content.replace(/\r\n/g, '\n').split('\n');
+    if (lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? '';
+      if (regex) {
+        regex.lastIndex = 0;
+        const match = regex.exec(line);
+        if (!match) {
+          continue;
+        }
+
+        matches.push({
+          path: entry.path,
+          lineNumber: index + 1,
+          lineText: line,
+          columnNumber: (match.index ?? 0) + 1,
+          context: formatContentWithLineNumbers(
+            lines.slice(Math.max(0, index - options.contextLines), Math.min(lines.length, index + options.contextLines + 1)).join('\n'),
+            Math.max(1, index + 1 - options.contextLines)
+          )
+        });
+        continue;
+      }
+
+      const haystack = options.caseSensitive ? line : line.toLowerCase();
+      const columnIndex = haystack.indexOf(literalNeedle);
+      if (columnIndex >= 0) {
+        matches.push({
+          path: entry.path,
+          lineNumber: index + 1,
+          lineText: line,
+          columnNumber: columnIndex + 1,
+          context: formatContentWithLineNumbers(
+            lines.slice(Math.max(0, index - options.contextLines), Math.min(lines.length, index + options.contextLines + 1)).join('\n'),
+            Math.max(1, index + 1 - options.contextLines)
+          )
+        });
+      }
+    }
+  }
+
+  const paged = paginateCollection(matches, options.offset, options.limit);
+
+  return {
+    basePath: options.path,
+    query: options.query,
+    matches: paged.items,
+    offset: paged.offset,
+    limit: paged.limit,
+    totalMatches: paged.totalItems,
+    truncated: paged.truncated
+  };
+}
+
+function combineGlob(basePath: string | undefined, pattern: string) {
+  const normalizedPattern = pattern.trim() || '**/*';
+  if (!basePath) {
+    return normalizedPattern;
+  }
+
+  const normalizedBase = basePath.replace(/^\/+|\/+$/g, '');
+  if (!normalizedBase) {
+    return normalizedPattern;
+  }
+
+  return `${normalizedBase}/${normalizedPattern}`;
+}
+
+async function buildDirectoryTree(
+  reads: Pick<GatewayExecutor['reads'], 'resolveWorkspacePath'>,
+  files: Pick<GatewayExecutor['files'], 'listDirectory'>,
+  workspaceUri: string,
+  options: {
+    path: string;
+    maxDepth: number;
+    offset?: number;
+    limit?: number;
+  }
+) {
+  const entries: Array<{ line: string; path: string; depth: number }> = [];
+
+  async function visit(currentPath: string, depth: number) {
+    if (depth > options.maxDepth) {
+      return;
+    }
+
+    const directoryUri = resolveWorkspacePath(reads, workspaceUri, currentPath);
+    const items = await files.listDirectory(directoryUri, currentPath);
+    const sortedItems = [...items].sort((left, right) => left.path.localeCompare(right.path));
+
+    for (const item of sortedItems) {
+      const relativeName = item.path.split('/').at(-1) ?? item.path;
+      entries.push({
+        path: item.path,
+        depth,
+        line: `${'  '.repeat(depth)}${relativeName}${item.type === 'directory' ? '/' : ''}`
+      });
+
+      if (item.type === 'directory' && depth < options.maxDepth) {
+        await visit(item.path, depth + 1);
+      }
+    }
+  }
+
+  await visit(options.path, 0);
+  const paged = paginateCollection(entries, options.offset, options.limit);
+  return {
+    path: options.path,
+    content: formatContentWithLineNumbers(paged.items.map((item) => item.line).join('\n'), paged.offset),
+    items: paged.items,
+    offset: paged.offset,
+    limit: paged.limit,
+    totalItems: paged.totalItems,
+    truncated: paged.truncated,
+    nextOffset: paged.truncated ? paged.offset + paged.items.length : null
+  };
+}
+
+async function applyPatchText(
+  reads: Pick<GatewayExecutor['reads'], 'resolveWorkspacePath'>,
+  files: Pick<GatewayExecutor['files'], 'readTextFile' | 'writeTextFile' | 'createFile' | 'deleteEntry'>,
+  workspaceUri: string,
+  patchText: string
+) {
+  const lines = patchText.replace(/\r\n/g, '\n').split('\n');
+  if (lines[0] !== '*** Begin Patch' || lines.at(-1) !== '*** End Patch') {
+    throw new McpInvalidParamsError('Invalid patch envelope');
+  }
+
+  let cursor = 1;
+  const updatedFiles: string[] = [];
+  while (cursor < lines.length - 1) {
+    const header = lines[cursor] ?? '';
+    if (header.startsWith('*** Update File: ')) {
+      const path = header.slice('*** Update File: '.length).trim();
+      cursor += 1;
+      if ((lines[cursor] ?? '') === '@@') {
+        cursor += 1;
+      }
+      const removals: string[] = [];
+      const additions: string[] = [];
+      while (cursor < lines.length - 1 && !lines[cursor]?.startsWith('*** ')) {
+        const line = lines[cursor] ?? '';
+        if (line.startsWith('-')) {
+          removals.push(line.slice(1));
+        } else if (line.startsWith('+')) {
+          additions.push(line.slice(1));
+        }
+        cursor += 1;
+      }
+      const fileUri = resolveWorkspacePath(reads, workspaceUri, path);
+      const file = await files.readTextFile(fileUri, path, { withLineNumbers: false });
+      const fromText = removals.join('\n');
+      const toText = additions.join('\n');
+      const replaced = applyTextEdits(file.content ?? '', [{ oldText: fromText, newText: toText, replaceAll: false }]);
+      await files.writeTextFile(fileUri, replaced.content);
+      updatedFiles.push(path);
+      continue;
+    }
+
+    if (header.startsWith('*** Add File: ')) {
+      const path = header.slice('*** Add File: '.length).trim();
+      cursor += 1;
+      const additions: string[] = [];
+      while (cursor < lines.length - 1 && !lines[cursor]?.startsWith('*** ')) {
+        const line = lines[cursor] ?? '';
+        additions.push(line.startsWith('+') ? line.slice(1) : line);
+        cursor += 1;
+      }
+      const fileUri = resolveWorkspacePath(reads, workspaceUri, path);
+      await files.createFile(fileUri);
+      await files.writeTextFile(fileUri, additions.join('\n'));
+      updatedFiles.push(path);
+      continue;
+    }
+
+    if (header.startsWith('*** Delete File: ')) {
+      const path = header.slice('*** Delete File: '.length).trim();
+      const fileUri = resolveWorkspacePath(reads, workspaceUri, path);
+      await files.deleteEntry(fileUri);
+      updatedFiles.push(path);
+      cursor += 1;
+      continue;
+    }
+
+    cursor += 1;
+  }
+
+  return {
+    updatedFiles
+  };
+}
+
+async function collectWorkspaceEntries(
+  reads: Pick<GatewayExecutor['reads'], 'resolveWorkspacePath'>,
+  files: Pick<GatewayExecutor['files'], 'listDirectory'>,
+  workspaceUri: string,
+  basePath: string,
+  predicate: (entry: Awaited<ReturnType<GatewayExecutor['files']['listDirectory']>>[number]) => boolean,
+  limit: number
+) {
+  const queue = [basePath];
+  const entries: Array<Awaited<ReturnType<GatewayExecutor['files']['listDirectory']>>[number]> = [];
+  let truncated = false;
+
+  while (queue.length > 0) {
+    const currentPath = queue.shift() ?? '';
+    const directoryUri = resolveWorkspacePath(reads, workspaceUri, currentPath);
+    const items = await files.listDirectory(directoryUri, currentPath);
+
+    for (const item of items) {
+      if (item.type === 'directory') {
+        queue.push(item.path);
+      }
+
+      if (!predicate(item)) {
+        continue;
+      }
+
+      entries.push(item);
+      if (entries.length >= limit) {
+        truncated = true;
+        return { entries, truncated };
+      }
+    }
+  }
+
+  return { entries, truncated };
+}
+
+function createGlobMatcher(pattern: string) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '::DOUBLE_STAR::')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '.')
+    .replace(/::DOUBLE_STAR::/g, '.*');
+  const regex = new RegExp(`^${escaped}$`);
+  return (value: string) => regex.test(value);
+}
+
+function parseJsonTextFile(content: string, path: string) {
+  try {
+    return JSON.parse(content) as unknown;
+  } catch {
+    throw new McpInvalidParamsError(`Invalid JSON file: ${path}`);
+  }
+}
+
+function resolveJsonPath(value: unknown, query: string) {
+  return query.split('.').filter(Boolean).reduce<unknown>((current, segment) => {
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) {
+        throw new McpInvalidParamsError(`JSON path not found: ${query}`);
+      }
+
+      return current[index];
+    }
+
+    if (!current || typeof current !== 'object' || !(segment in current)) {
+      throw new McpInvalidParamsError(`JSON path not found: ${query}`);
+    }
+
+    return (current as Record<string, unknown>)[segment];
+  }, value);
+}
+
+function applyTextEdits(content: string, edits: Array<{ oldText: string; newText: string; replaceAll: boolean }>) {
+  let nextContent = content;
+  let appliedEdits = 0;
+
+  for (const edit of edits) {
+    if (edit.replaceAll) {
+      const parts = nextContent.split(edit.oldText);
+      const matches = parts.length - 1;
+      if (matches <= 0) {
+        throw new McpInvalidParamsError(`Edit target not found: ${edit.oldText}`);
+      }
+
+      nextContent = parts.join(edit.newText);
+      appliedEdits += matches;
+      continue;
+    }
+
+    const index = nextContent.indexOf(edit.oldText);
+    if (index < 0) {
+      throw new McpInvalidParamsError(`Edit target not found: ${edit.oldText}`);
+    }
+
+    nextContent = `${nextContent.slice(0, index)}${edit.newText}${nextContent.slice(index + edit.oldText.length)}`;
+    appliedEdits += 1;
+  }
+
+  return {
+    content: nextContent,
+    appliedEdits
+  };
+}
+
+function paginateCollection<T>(items: T[], offset: number | undefined, limit: number | undefined) {
+  const normalizedOffset = Math.max(1, offset ?? 1);
+  const startIndex = Math.min(normalizedOffset - 1, items.length);
+  const normalizedLimit = Math.max(1, limit ?? Math.max(items.length - startIndex, 1));
+  const pagedItems = items.slice(startIndex, startIndex + normalizedLimit);
+  return {
+    items: pagedItems,
+    offset: normalizedOffset,
+    limit: normalizedLimit,
+    totalItems: items.length,
+    truncated: normalizedOffset > 1 || startIndex + normalizedLimit < items.length
+  };
+}
+
+function paginateBinaryPayload(data: Uint8Array, offset: number | undefined, limit: number | undefined) {
+  const normalizedOffset = Math.max(1, offset ?? 1);
+  const startIndex = Math.min(normalizedOffset - 1, data.byteLength);
+  const normalizedLimit = Math.max(1, limit ?? Math.max(data.byteLength - startIndex, 1));
+  const endIndex = Math.min(data.byteLength, startIndex + normalizedLimit);
+  return {
+    data: data.slice(startIndex, endIndex),
+    offset: normalizedOffset,
+    limit: normalizedLimit,
+    totalBytes: data.byteLength,
+    truncated: normalizedOffset > 1 || endIndex < data.byteLength
+  };
+}
+
+function formatContentWithLineNumbers(content: string, startLine = 1) {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  if (lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+
+  return lines.map((line, index) => `${startLine + index}: ${line}`).join('\n');
 }
 
 function resolveOptionalTerminalCwd(
