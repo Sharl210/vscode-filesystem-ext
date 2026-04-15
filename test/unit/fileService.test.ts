@@ -32,6 +32,14 @@ function createAdapter(): FileSystemAdapter {
       }
     ],
     [
+      'file:///workspace/demo/src/notes.txt',
+      {
+        type: FILE,
+        data: new TextEncoder().encode('alpha\nbeta\ngamma\ndelta\nepsilon\n'),
+        mtime: 12
+      }
+    ],
+    [
       'file:///workspace/demo/src/huge.txt',
       {
         type: FILE,
@@ -50,6 +58,7 @@ function createAdapter(): FileSystemAdapter {
       return [
         ['at_dispatcher.c', FILE],
         ['hello.ts', FILE],
+        ['notes.txt', FILE],
         ['logo.png', FILE],
         ['huge.txt', FILE]
       ];
@@ -92,7 +101,7 @@ describe('file service', () => {
 
     const items = await service.listDirectory('file:///workspace/demo/src', 'src');
 
-    expect(items).toHaveLength(4);
+    expect(items).toHaveLength(5);
     expect(items[0]).toMatchObject({
       name: 'at_dispatcher.c',
       path: 'src/at_dispatcher.c',
@@ -116,6 +125,28 @@ describe('file service', () => {
     expect(result.content).toBe('export const hello = true;');
     expect(result.editable).toBe(true);
     expect(result.encoding).toBe('utf-8');
+  });
+
+  it('reads a selected line window and reports slice metadata for text files', async () => {
+    const service = createFileService(createAdapter());
+
+    const result = await service.readTextFile('file:///workspace/demo/src/notes.txt', 'src/notes.txt', {
+      offset: 2,
+      limit: 2,
+      withLineNumbers: true
+    });
+
+    expect(result.content).toBe('2: beta\n3: gamma');
+    expect(result.slice).toEqual({
+      offset: 2,
+      limit: 2,
+      totalLines: 5,
+      returnedLineStart: 2,
+      returnedLineEnd: 3,
+      truncated: true,
+      withLineNumbers: true,
+      nextOffset: 4
+    });
   });
 
   it('still returns string content for files that are not editable text', async () => {

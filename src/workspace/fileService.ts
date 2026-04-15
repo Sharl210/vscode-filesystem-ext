@@ -1,8 +1,9 @@
-import type { FileEntryDto, GetFileResponseDto } from '../types/api';
-import { createDisguisedImagePayload, createTarArchive, createZipArchive, decodeDataUrlBytes, type ArchiveEntry } from '../utils/archive';
-import { detectMimeType } from '../utils/mime';
-import { decodeTextContent, encodeUtf8, isProbablyText } from '../utils/text';
+import type { GatewayReadTextFileOptions } from '../executor/contracts';
 import type { ExportProgressUpdate } from '../state/exportJobs';
+import type { FileEntryDto, GetFileResponseDto, ReadTextFileSliceDto } from '../types/api';
+import { type ArchiveEntry, createDisguisedImagePayload, createTarArchive, createZipArchive, decodeDataUrlBytes } from '../utils/archive';
+import { detectMimeType } from '../utils/mime';
+import { decodeTextContent, encodeUtf8 } from '../utils/text';
 
 export type FileTypeValue = number;
 
@@ -25,7 +26,7 @@ export interface FileSystemAdapter {
 
 interface FileService {
   listDirectory(directoryUri: string, directoryPath: string): Promise<FileEntryDto[]>;
-  readTextFile(fileUri: string, relativePath: string): Promise<GetFileResponseDto>;
+  readTextFile(fileUri: string, relativePath: string, options?: GatewayReadTextFileOptions): Promise<GetFileResponseDto>;
   readBinaryFile(fileUri: string, relativePath: string): Promise<{ data: Uint8Array; mimeType: string; fileName: string }>;
   exportArchive(
     entries: Array<{ uri: string; path: string }>,
@@ -57,7 +58,7 @@ export function createFileService(adapter: FileSystemAdapter): FileService {
           try {
             const stat = await adapter.stat(uri);
             const mimeType = type === 2 ? 'inode/directory' : detectMimeType(name);
-            const isText = type === 2 ? false : isProbablyText(await adapter.readFile(uri), mimeType, name);
+            const isText = type === 2 ? false : isLikelyTextFromMetadata(mimeType, name);
 
             return createFileEntry(name, joinRelativePath(directoryPath, name), type, stat, mimeType, isText);
           } catch {
@@ -70,7 +71,7 @@ export function createFileService(adapter: FileSystemAdapter): FileService {
         .filter((item): item is FileEntryDto => item !== null)
         .sort((left, right) => left.name.localeCompare(right.name));
     },
-    async readTextFile(fileUri, relativePath) {
+    async readTextFile(fileUri, relativePath, options) {
       const stat = await adapter.stat(fileUri);
       const content = await adapter.readFile(fileUri);
       const name = getBaseName(relativePath);
@@ -78,12 +79,14 @@ export function createFileService(adapter: FileSystemAdapter): FileService {
       const decoded = decodeTextContent(content, mimeType, name);
       const isText = decoded.isText;
       const file = createFileEntry(name, relativePath, 1, stat, mimeType, isText);
+      const sliced = sliceTextContent(decoded.content, options);
 
       return {
         file,
-        content: decoded.content,
+        content: sliced.content,
         encoding: decoded.encoding,
-        editable: isText && stat.size <= MAX_INLINE_EDIT_BYTES
+        editable: isText && stat.size <= MAX_INLINE_EDIT_BYTES,
+        slice: sliced.slice
       };
     },
     async readBinaryFile(fileUri, relativePath) {
@@ -302,4 +305,72 @@ function calculateStageProgress(stageStart: number, stageEnd: number, processedB
   const safeTotal = Math.max(totalBytes, 1);
   const ratio = Math.max(0, Math.min(1, processedBytes / safeTotal));
   return stageStart + (stageEnd - stageStart) * ratio;
+}
+
+function sliceTextContent(content: string, options?: GatewayReadTextFileOptions): { content: string; slice?: ReadTextFileSliceDto } {
+  const offset = normalizePositiveInteger(options?.offset);
+  const limit = normalizePositiveInteger(options?.limit);
+  const withLineNumbers = options?.withLineNumbers === true;
+
+  if (!offset && !limit && !withLineNumbers) {
+    return { content };
+  }
+
+  const lines = splitTextLines(content);
+  const totalLines = lines.length;
+  const startLine = Math.max(1, offset ?? 1);
+  const requestedLimit = Math.max(1, limit ?? Math.max(totalLines - startLine + 1, 1));
+  const startIndex = Math.min(startLine - 1, totalLines);
+  const selectedLines = lines.slice(startIndex, startIndex + requestedLimit);
+  const returnedLineStart = selectedLines.length > 0 ? startLine : null;
+  const returnedLineEnd = selectedLines.length > 0 ? startLine + selectedLines.length - 1 : null;
+  const renderedLines = withLineNumbers
+    ? selectedLines.map((line, index) => `${startLine + index}: ${line}`)
+    : selectedLines;
+
+  return {
+    content: renderedLines.join('\n'),
+    slice: {
+      offset: startLine,
+      limit: requestedLimit,
+      totalLines,
+      returnedLineStart,
+      returnedLineEnd,
+      truncated: startLine > 1 || (returnedLineEnd ?? 0) < totalLines,
+      withLineNumbers,
+      nextOffset: returnedLineEnd !== null && returnedLineEnd < totalLines ? returnedLineEnd + 1 : null
+    }
+  };
+}
+
+function normalizePositiveInteger(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  const normalized = Math.trunc(value);
+  return normalized > 0 ? normalized : undefined;
+}
+
+function splitTextLines(content: string) {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  if (lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+function isLikelyTextFromMetadata(mimeType: string, fileName: string) {
+  if (mimeType.startsWith('text/')) {
+    return true;
+  }
+
+  if (mimeType === 'application/json' || mimeType === 'application/xml' || mimeType === 'image/svg+xml') {
+    return true;
+  }
+
+  const lowerFileName = fileName.toLowerCase();
+  return ['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.txt', '.css', '.html', '.xml', '.yaml', '.yml', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.sh'].some((extension) => lowerFileName.endsWith(extension));
 }
