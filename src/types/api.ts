@@ -62,11 +62,23 @@ export interface FileEntryDto {
   downloadable: boolean;
 }
 
+export interface ReadTextFileSliceDto {
+  offset: number;
+  limit: number;
+  totalLines: number;
+  returnedLineStart: number | null;
+  returnedLineEnd: number | null;
+  truncated: boolean;
+  withLineNumbers: boolean;
+  nextOffset: number | null;
+}
+
 export interface GetFileResponseDto {
   file: FileEntryDto;
   content?: string;
   encoding?: string;
   editable: boolean;
+  slice?: ReadTextFileSliceDto;
 }
 
 export type TerminalTabStatusDto = 'idle' | 'running';

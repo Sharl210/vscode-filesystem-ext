@@ -2,13 +2,15 @@ import type {
   GatewayExecutor,
   GatewayExportJobController,
   GatewayFileExecutor,
-  GatewayTerminalManager,
+  GatewayLanguageExecutor,
   GatewayReadContextExecutor,
+  GatewayReadTextFileOptions,
+  GatewayTerminalManager
 } from './contracts';
 
 interface LocalGatewayFileServiceAdapter {
   listDirectory: GatewayFileExecutor['listDirectory'];
-  readTextFile: GatewayFileExecutor['readTextFile'];
+  readTextFile(fileUri: string, relativePath: string, options?: GatewayReadTextFileOptions): ReturnType<GatewayFileExecutor['readTextFile']>;
   readBinaryFile: GatewayFileExecutor['readBinaryFile'];
   exportArchive: GatewayFileExecutor['exportArchive'];
   exportDisguisedImage: GatewayFileExecutor['exportDisguisedImage'];
@@ -39,10 +41,24 @@ interface LocalGatewayTerminalAdapter {
   cancelExecution: GatewayTerminalManager['cancelExecution'];
 }
 
+interface LocalGatewayLanguageAdapter {
+  getDiagnostics: GatewayLanguageExecutor['getDiagnostics'];
+  getDefinition: GatewayLanguageExecutor['getDefinition'];
+  findReferences: GatewayLanguageExecutor['findReferences'];
+  getDocumentSymbols: GatewayLanguageExecutor['getDocumentSymbols'];
+  getWorkspaceSymbols: GatewayLanguageExecutor['getWorkspaceSymbols'];
+  getHover: GatewayLanguageExecutor['getHover'];
+  getCodeActions: GatewayLanguageExecutor['getCodeActions'];
+  prepareRename: GatewayLanguageExecutor['prepareRename'];
+  getRenameEdits: GatewayLanguageExecutor['getRenameEdits'];
+  getFormatEdits: GatewayLanguageExecutor['getFormatEdits'];
+}
+
 interface LocalGatewayExecutorDependencies {
   reads: GatewayReadContextExecutor;
   fileService: LocalGatewayFileServiceAdapter;
   exportJobs: LocalGatewayExportJobsAdapter;
+  language: LocalGatewayLanguageAdapter;
   terminal: LocalGatewayTerminalAdapter;
 }
 
@@ -50,6 +66,7 @@ class LocalGatewayExecutor implements GatewayExecutor {
   readonly reads: GatewayReadContextExecutor;
   readonly files: GatewayFileExecutor;
   readonly exports: GatewayExportJobController;
+  readonly language: GatewayLanguageExecutor;
   readonly terminal: GatewayTerminalManager;
 
   constructor(dependencies: LocalGatewayExecutorDependencies) {
@@ -63,6 +80,15 @@ class LocalGatewayExecutor implements GatewayExecutor {
       getConnectionInfo() {
         return dependencies.reads.getConnectionInfo();
       },
+      getActiveEditor() {
+        return dependencies.reads.getActiveEditor();
+      },
+      listOpenDocuments() {
+        return dependencies.reads.listOpenDocuments();
+      },
+      findFiles(input) {
+        return dependencies.reads.findFiles(input);
+      },
       getWorkspaceById(id) {
         return dependencies.reads.getWorkspaceById(id);
       },
@@ -74,7 +100,11 @@ class LocalGatewayExecutor implements GatewayExecutor {
       listDirectory(directoryUri, directoryPath) {
         return dependencies.fileService.listDirectory(directoryUri, directoryPath);
       },
-      readTextFile(fileUri, relativePath) {
+      readTextFile(fileUri, relativePath, options) {
+        if (options) {
+          return dependencies.fileService.readTextFile(fileUri, relativePath, options);
+        }
+
         return dependencies.fileService.readTextFile(fileUri, relativePath);
       },
       readBinaryFile(fileUri, relativePath) {
@@ -137,6 +167,38 @@ class LocalGatewayExecutor implements GatewayExecutor {
       },
       cancelJob(jobId) {
         return dependencies.exportJobs.cancelJob(jobId);
+      }
+    };
+    this.language = {
+      getDiagnostics(input) {
+        return dependencies.language.getDiagnostics(input);
+      },
+      getDefinition(input) {
+        return dependencies.language.getDefinition(input);
+      },
+      findReferences(input) {
+        return dependencies.language.findReferences(input);
+      },
+      getDocumentSymbols(input) {
+        return dependencies.language.getDocumentSymbols(input);
+      },
+      getWorkspaceSymbols(input) {
+        return dependencies.language.getWorkspaceSymbols(input);
+      },
+      getHover(input) {
+        return dependencies.language.getHover(input);
+      },
+      getCodeActions(input) {
+        return dependencies.language.getCodeActions(input);
+      },
+      prepareRename(input) {
+        return dependencies.language.prepareRename(input);
+      },
+      getRenameEdits(input) {
+        return dependencies.language.getRenameEdits(input);
+      },
+      getFormatEdits(input) {
+        return dependencies.language.getFormatEdits(input);
       }
     };
     this.terminal = {

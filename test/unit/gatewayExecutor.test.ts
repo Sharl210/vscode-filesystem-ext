@@ -48,6 +48,18 @@ describe('local gateway executor', () => {
           calls.push({ method: 'getConnectionInfo', args });
           return connectionInfo;
         },
+        getActiveEditor(...args) {
+          calls.push({ method: 'getActiveEditor', args });
+          return null;
+        },
+        listOpenDocuments(...args) {
+          calls.push({ method: 'listOpenDocuments', args });
+          return { items: [] };
+        },
+        async findFiles(...args) {
+          calls.push({ method: 'findFiles', args });
+          return [];
+        },
         getWorkspaceById(...args) {
           calls.push({ method: 'getWorkspaceById', args });
           return workspaces[0];
@@ -106,12 +118,16 @@ describe('local gateway executor', () => {
           throw new Error('not used');
         }
       },
+      language: createUnusedLanguageStub(),
       terminal: createUnusedTerminalStub()
     });
 
     expect(executor.reads.getWorkspaces()).toBe(workspaces);
     expect(executor.reads.getInitialLocation()).toBe(initialLocation);
     expect(executor.reads.getConnectionInfo()).toBe(connectionInfo);
+    expect(executor.reads.getActiveEditor()).toBeNull();
+    expect(executor.reads.listOpenDocuments()).toEqual({ items: [] });
+    await expect(executor.reads.findFiles({ workspaceUri: 'file:///workspace/demo', includePattern: '**/*.ts' })).resolves.toEqual([]);
     expect(executor.reads.getWorkspaceById('ws_demo')).toBe(workspaces[0]);
     expect(executor.reads.resolveWorkspacePath('file:///workspace/demo', 'src/index.ts')).toBe('file:///workspace/demo/src/index.ts');
 
@@ -119,6 +135,9 @@ describe('local gateway executor', () => {
       { method: 'getWorkspaces', args: [] },
       { method: 'getInitialLocation', args: [] },
       { method: 'getConnectionInfo', args: [] },
+      { method: 'getActiveEditor', args: [] },
+      { method: 'listOpenDocuments', args: [] },
+      { method: 'findFiles', args: [{ workspaceUri: 'file:///workspace/demo', includePattern: '**/*.ts' }] },
       { method: 'getWorkspaceById', args: ['ws_demo'] },
       { method: 'resolveWorkspacePath', args: ['file:///workspace/demo', 'src/index.ts'] }
     ]);
@@ -216,6 +235,48 @@ describe('local gateway executor', () => {
           throw new Error('not used');
         }
       },
+      language: {
+        async getDiagnostics(...args) {
+          calls.push({ method: 'getDiagnostics', args });
+          return { items: [] };
+        },
+        async getDefinition(...args) {
+          calls.push({ method: 'getDefinition', args });
+          return { items: [] };
+        },
+        async findReferences(...args) {
+          calls.push({ method: 'findReferences', args });
+          return { items: [] };
+        },
+        async getDocumentSymbols(...args) {
+          calls.push({ method: 'getDocumentSymbols', args });
+          return { items: [] };
+        },
+        async getWorkspaceSymbols(...args) {
+          calls.push({ method: 'getWorkspaceSymbols', args });
+          return { items: [] };
+        },
+        async getHover(...args) {
+          calls.push({ method: 'getHover', args });
+          return { items: [] };
+        },
+        async getCodeActions(...args) {
+          calls.push({ method: 'getCodeActions', args });
+          return { items: [] };
+        },
+        async prepareRename(...args) {
+          calls.push({ method: 'prepareRename', args });
+          return null;
+        },
+        async getRenameEdits(...args) {
+          calls.push({ method: 'getRenameEdits', args });
+          return { changes: [] };
+        },
+        async getFormatEdits(...args) {
+          calls.push({ method: 'getFormatEdits', args });
+          return { changes: [] };
+        }
+      },
       terminal: {
         listTabs() {
           return { tabs: [], defaultTabId: null };
@@ -300,6 +361,16 @@ describe('local gateway executor', () => {
       executionId: 'exec-1',
       status: 'queued'
     });
+    await expect(executor.language.getDiagnostics({ uri: 'file:///workspace/demo/hello.ts' })).resolves.toEqual({ items: [] });
+    await expect(executor.language.getDefinition({ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 })).resolves.toEqual({ items: [] });
+    await expect(executor.language.findReferences({ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 })).resolves.toEqual({ items: [] });
+    await expect(executor.language.getDocumentSymbols({ uri: 'file:///workspace/demo/hello.ts' })).resolves.toEqual({ items: [] });
+    await expect(executor.language.getWorkspaceSymbols({ query: 'hello' })).resolves.toEqual({ items: [] });
+    await expect(executor.language.getHover({ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 })).resolves.toEqual({ items: [] });
+    await expect(executor.language.getCodeActions({ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 })).resolves.toEqual({ items: [] });
+    await expect(executor.language.prepareRename({ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 })).resolves.toBeNull();
+    await expect(executor.language.getRenameEdits({ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4, newName: 'renamed' })).resolves.toEqual({ changes: [] });
+    await expect(executor.language.getFormatEdits({ uri: 'file:///workspace/demo/hello.ts' })).resolves.toEqual({ changes: [] });
     expect(executor.terminal.getExecution('exec-1')).toBeNull();
     expect(executor.terminal.getExecutionOutput('exec-1')).toBeNull();
     expect(executor.terminal.cancelExecution('exec-1')).toBe(false);
@@ -324,6 +395,16 @@ describe('local gateway executor', () => {
       { method: 'renameEntry', args: ['file:///workspace/demo/c', 'file:///workspace/demo/d'] },
       { method: 'execute', args: [{ command: 'pwd', cwd: '/workspace/demo' }] },
       { method: 'startExecution', args: [{ command: 'pwd', cwd: '/workspace/demo' }] },
+      { method: 'getDiagnostics', args: [{ uri: 'file:///workspace/demo/hello.ts' }] },
+      { method: 'getDefinition', args: [{ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 }] },
+      { method: 'findReferences', args: [{ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 }] },
+      { method: 'getDocumentSymbols', args: [{ uri: 'file:///workspace/demo/hello.ts' }] },
+      { method: 'getWorkspaceSymbols', args: [{ query: 'hello' }] },
+      { method: 'getHover', args: [{ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 }] },
+      { method: 'getCodeActions', args: [{ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 }] },
+      { method: 'prepareRename', args: [{ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4 }] },
+      { method: 'getRenameEdits', args: [{ uri: 'file:///workspace/demo/hello.ts', line: 2, character: 4, newName: 'renamed' }] },
+      { method: 'getFormatEdits', args: [{ uri: 'file:///workspace/demo/hello.ts' }] },
       { method: 'getExecution', args: ['exec-1'] },
       { method: 'getExecutionOutput', args: ['exec-1'] },
       { method: 'cancelExecution', args: ['exec-1'] }
@@ -405,6 +486,7 @@ describe('local gateway executor', () => {
           return true;
         }
       },
+      language: createUnusedLanguageStub(),
       terminal: createUnusedTerminalStub()
     });
 
@@ -455,6 +537,15 @@ function createUnusedReadsStub() {
     getConnectionInfo() {
       throw new Error('not used');
     },
+    getActiveEditor() {
+      throw new Error('not used');
+    },
+    listOpenDocuments() {
+      throw new Error('not used');
+    },
+    async findFiles() {
+      throw new Error('not used');
+    },
     getWorkspaceById() {
       throw new Error('not used');
     },
@@ -491,6 +582,41 @@ function createUnusedTerminalStub() {
       throw new Error('not used');
     },
     cancelExecution() {
+      throw new Error('not used');
+    }
+  };
+}
+
+function createUnusedLanguageStub() {
+  return {
+    async getDiagnostics() {
+      throw new Error('not used');
+    },
+    async getDefinition() {
+      throw new Error('not used');
+    },
+    async findReferences() {
+      throw new Error('not used');
+    },
+    async getDocumentSymbols() {
+      throw new Error('not used');
+    },
+    async getWorkspaceSymbols() {
+      throw new Error('not used');
+    },
+    async getHover() {
+      throw new Error('not used');
+    },
+    async getCodeActions() {
+      throw new Error('not used');
+    },
+    async prepareRename() {
+      throw new Error('not used');
+    },
+    async getRenameEdits() {
+      throw new Error('not used');
+    },
+    async getFormatEdits() {
       throw new Error('not used');
     }
   };
